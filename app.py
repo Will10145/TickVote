@@ -5,11 +5,14 @@ import secrets
 import requests
 from flask import abort
 from dotenv import load_dotenv
+from flask_migrate import Migrate
 import os
 
 load_dotenv()  # load env
 
 app = Flask(__name__)
+
+migrate = Migrate(app, db)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///../instance/tickvote.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.secret_key = os.getenv('FLASK_SECRET_KEY', 'changeme')

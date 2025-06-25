@@ -1,4 +1,5 @@
 python3 -m venv .venv
+git pull
 source .venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
