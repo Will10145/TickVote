@@ -29,6 +29,8 @@
             margin-bottom: 0.3rem;
             display: block;
         }
+
+        
     </style>
 </head>
 <body>
@@ -36,11 +38,15 @@
         <h1>Poll Created!</h1>
         <div>
             <span class="label">Share this Poll Link:</span>
-            <div class="link-box">{{ poll_url }}</div>
+            <div class="link-box">
+                <a href="{{ poll_url }}" style="color:#2563eb;word-break:break-all;text-decoration:underline;">{{ poll_url }}</a>
+            </div>
         </div>
         <div>
             <span class="label">Stats Link (keep this secret):</span>
-            <div class="link-box">{{ stats_url }}</div>
+            <div class="link-box">
+                <a href="{{ stats_url }}" style="color:#2563eb;word-break:break-all;text-decoration:underline;">{{ stats_url }}</a>
+            </div>
         </div>
         <div style="margin-top:1.5rem;">
             <span class="label">Poll expires:</span>

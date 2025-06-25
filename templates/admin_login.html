@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Admin Login – TickVote</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css?family=Inter:400,600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .login-container {
+            max-width: 400px;
+            margin: 5rem auto 2rem auto;
+            background: #fff;
+            border-radius: 1rem;
+            box-shadow: 0 2px 16px rgba(44,62,80,0.07);
+            padding: 2rem 2.5rem;
+            text-align: center;
+        }
+        .login-input {
+            width: 100%;
+            padding: 0.7rem;
+            font-size: 1.1rem;
+            margin-bottom: 1.2rem;
+            border-radius: 6px;
+            border: 1px solid #cbd5e1;
+        }
+        .main-btn {
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <h1>Admin Login</h1>
+        {% if error %}
+            <p style="color:red;">{{ error }}</p>
+        {% endif %}
+        <form method="post">
+            <input class="login-input" type="password" name="password" placeholder="Admin password" required>
+            <button class="main-btn" type="submit">Login</button>
+        </form>
+    </div>
+</body>
+</html>

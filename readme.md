@@ -8,6 +8,7 @@ FLASK_SECRET_KEY=[SET THIS TO ANYTHING!]
 RECAPTCHA_SITE_KEY=
 RECAPTCHA_SECRET_KEY=
 DATABASE_URL=sqlite:///../instance/tickvote.db
+ADMIN_PASSWORD=admin
 ```
 Get your recaptcha key from [here](https://www.google.com/recaptcha/admin/create) <br>
 Once you have editited the .env file, run this command in your terminal to set up your enviroment

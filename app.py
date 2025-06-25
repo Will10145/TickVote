@@ -1,4 +1,4 @@
-from flask import Flask, render_template, redirect, url_for, request, flash, make_response, jsonify
+from flask import Flask, render_template, redirect, url_for, request, flash, make_response, jsonify, session
 from models import db, Poll, Option
 from datetime import datetime, timedelta
 import secrets
@@ -19,6 +19,7 @@ app.secret_key = os.getenv('FLASK_SECRET_KEY', 'changeme')
 db.init_app(app)
 
 RECAPTCHA_SECRET_KEY = os.getenv('RECAPTCHA_SECRET_KEY')  # Set this in the .env file - look in readme
+ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'changeme')
 
 def generate_token():
     return secrets.token_urlsafe(8)
@@ -163,12 +164,40 @@ def unpause_poll(token):
     db.session.commit()
     return redirect(url_for('poll_stats', stats_token=poll.stats_token))
 
+@app.route('/admin/login', methods=['GET', 'POST'])
+def admin_login():
+    error = None
+    if request.method == 'POST':
+        password = request.form.get('password')
+        if password == ADMIN_PASSWORD:
+            session['admin_logged_in'] = True
+            return redirect(url_for('admin_dashboard'))
+        else:
+            error = "Incorrect password."
+    return render_template('admin_login.html', error=error)
+
+@app.route('/admin/logout')
+def admin_logout():
+    session.pop('admin_logged_in', None)
+    return redirect(url_for('admin_login'))
+
+def admin_required(f):
+    from functools import wraps
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('admin_logged_in'):
+            return redirect(url_for('admin_login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
 @app.route('/admin')
+@admin_required
 def admin_dashboard():
     polls = Poll.query.all()
     return render_template('admin_dashboard.html', polls=polls)
 
 @app.route('/admin/poll/<int:poll_id>/edit', methods=['GET', 'POST'])
+@admin_required
 def admin_edit_poll(poll_id):
     poll = Poll.query.get_or_404(poll_id)
     if request.method == 'POST':
@@ -184,6 +213,7 @@ def admin_edit_poll(poll_id):
     return render_template('admin_edit_poll.html', poll=poll)
 
 @app.route('/admin/poll/<int:poll_id>/delete', methods=['POST'])
+@admin_required
 def admin_delete_poll(poll_id):
     poll = Poll.query.get_or_404(poll_id)
     Option.query.filter_by(poll_id=poll.id).delete()
@@ -192,6 +222,7 @@ def admin_delete_poll(poll_id):
     return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/poll/<int:poll_id>/lock', methods=['POST'])
+@admin_required
 def admin_lock_poll(poll_id):
     poll = Poll.query.get_or_404(poll_id)
     poll.locked = True
@@ -199,6 +230,7 @@ def admin_lock_poll(poll_id):
     return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/poll/<int:poll_id>/unlock', methods=['POST'])
+@admin_required
 def admin_unlock_poll(poll_id):
     poll = Poll.query.get_or_404(poll_id)
     poll.locked = False
@@ -206,6 +238,7 @@ def admin_unlock_poll(poll_id):
     return redirect(url_for('admin_dashboard'))
 
 @app.route('/admin/option/<int:option_id>/add_vote', methods=['POST'])
+@admin_required
 def admin_add_vote(option_id):
     option = Option.query.get_or_404(option_id)
     option.votes += 1
@@ -213,6 +246,7 @@ def admin_add_vote(option_id):
     return redirect(request.referrer or url_for('admin_dashboard'))
 
 @app.route('/admin/option/<int:option_id>/remove_vote', methods=['POST'])
+@admin_required
 def admin_remove_vote(option_id):
     option = Option.query.get_or_404(option_id)
     if option.votes > 0:
@@ -241,6 +275,14 @@ def poll_stats(stats_token):
 @app.context_processor
 def inject_recaptcha_site_key():
     return dict(RECAPTCHA_SITE_KEY=os.getenv('RECAPTCHA_SITE_KEY', ''))
+
+@app.route('/about')
+def about():
+    return render_template('about.html')
+
+@app.errorhandler(404)
+def error_four_oh_four(s):
+    return render_template('404.html')
 
 if __name__ == '__main__':
     with app.app_context():
