@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Poll Deleted – TickVote</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css?family=Inter:400,600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .deleted-container {
+            max-width: 500px;
+            margin: 3rem auto 2rem auto;
+            background: #fff;
+            border-radius: 1rem;
+            box-shadow: 0 2px 16px rgba(44,62,80,0.07);
+            padding: 2rem 2.5rem;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="deleted-container">
+        <h1>Poll Deleted</h1>
+        <p>The poll and all its votes have been permanently removed.</p>
+        <a class="main-btn" href="{{ url_for('dashboard') }}">Back to Dashboard</a>
+    </div>
+</body>
+</html>

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Admin – All Polls</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css?family=Inter:400,600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .admin-container { max-width: 800px; margin: 3rem auto; background: #fff; border-radius: 1rem; box-shadow: 0 2px 16px rgba(44,62,80,0.07); padding: 2rem 2.5rem; }
+        .poll-table { width: 100%; border-collapse: collapse; }
+        .poll-table th, .poll-table td { padding: 0.7rem; border-bottom: 1px solid #e2e8f0; text-align: left; }
+        .poll-table th { background: #f7fafc; }
+        .option-list { margin: 0; padding: 0; list-style: none; }
+        .option-list li { margin-bottom: 0.2rem; }
+        .admin-actions form { display: inline; }
+        .admin-btn { background: #3182ce; color: #fff; border: none; border-radius: 4px; padding: 0.3rem 0.8rem; cursor: pointer; font-size: 1rem; margin-right: 0.3rem; }
+        .admin-btn.danger { background: #e53e3e; }
+        .admin-btn.small { font-size: 0.95rem; padding: 0.2rem 0.6rem; }
+    </style>
+</head>
+<body>
+    <div class="admin-container">
+        <h1>Admin: All Polls</h1>
+        <table class="poll-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Question</th>
+                    <th>Options & Votes</th>
+                    <th>Expires</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for poll in polls %}
+                <tr>
+                    <td>{{ poll.id }}</td>
+                    <td>{{ poll.question }}</td>
+                    <td>
+                        <ul class="option-list">
+                        {% for option in poll.options %}
+                            <li>
+                                {{ option.text }} ({{ option.votes }})
+                                <form method="post" action="{{ url_for('admin_add_vote', option_id=option.id) }}" style="display:inline;">
+                                    <button class="admin-btn small" type="submit" title="Add Vote">+</button>
+                                </form>
+                                <form method="post" action="{{ url_for('admin_remove_vote', option_id=option.id) }}" style="display:inline;">
+                                    <button class="admin-btn small" type="submit" title="Remove Vote" {% if option.votes == 0 %}disabled{% endif %}>-</button>
+                                </form>
+                            </li>
+                        {% endfor %}
+                        </ul>
+                    </td>
+                    <td>
+                        {% if poll.expires_at %}
+                            {{ poll.expires_at.strftime('%Y-%m-%d %H:%M') }}
+                        {% endif %}
+                    </td>
+                    <td class="admin-actions">
+                        <a class="admin-btn" href="{{ url_for('admin_edit_poll', poll_id=poll.id) }}">Edit</a>
+                        <form method="post" action="{{ url_for('admin_delete_poll', poll_id=poll.id) }}" style="display:inline;" onsubmit="return confirm('Delete this poll?');">
+                            <button class="admin-btn danger" type="submit">Delete</button>
+                        </form>
+                        {% if poll.locked %}
+                        <form method="post" action="{{ url_for('admin_unlock_poll', poll_id=poll.id) }}" style="display:inline;">
+                            <button class="admin-btn" type="submit" style="background:#38a169;">Unlock</button>
+                        </form>
+                        {% else %}
+                        <form method="post" action="{{ url_for('admin_lock_poll', poll_id=poll.id) }}" style="display:inline;">
+                            <button class="admin-btn" type="submit" style="background:#eab308;">Lock</button>
+                        </form>
+                        {% endif %}
+                        {% if poll.paused %}
+                        <form method="post" action="{{ url_for('unpause_poll', token=poll.token) }}" style="display:inline;">
+                            <button class="admin-btn" type="submit" style="background:#38a169;">Unpause</button>
+                        </form>
+                        {% else %}
+                        <form method="post" action="{{ url_for('pause_poll', token=poll.token) }}" style="display:inline;">
+                            <button class="admin-btn" type="submit" style="background:#eab308;">Pause</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <div style="margin-top:2rem;text-align:center;">
+            <a class="main-btn" href="{{ url_for('dashboard') }}">Back to Dashboard</a>
+        </div>
+    </div>
+</body>
+</html>

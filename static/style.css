@@ -1,0 +1,85 @@
+html, body {
+    height: 100%;
+    margin: 0;
+    font-family: 'Inter', Arial, sans-serif;
+    background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+}
+
+.main-logo {
+    display: flex;
+    align-items: center;
+    font-size: 2.2rem;
+    font-weight: bold;
+    color: #2d3748;
+    margin-top: 3rem;
+    justify-content: center;
+}
+
+.logo-text {
+    margin-left: 0.5rem;
+    letter-spacing: 1px;
+}
+
+h1 {
+    margin: 2rem 0 1rem 0;
+    color: #2d3748;
+    font-size: 2.5rem;
+    font-weight: 700;
+    text-align: center;
+}
+
+.subtitle {
+    color: #4a5568;
+    font-size: 1.25rem;
+    margin-bottom: 2.5rem;
+    text-align: center;
+    line-height: 1.5;
+}
+
+.main-btn {
+    display: block;
+    margin: 0 auto 2.5rem auto;
+    padding: 1.1rem 2.5rem;
+    background: #3182ce;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 1.2rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.main-btn:hover {
+    background: #2563eb;
+}
+
+.main-footer {
+    color: #718096;
+    font-size: 1.05rem;
+    text-align: center;
+    margin-bottom: 2.5rem;
+}
+
+.main-footer a {
+    color: #3182ce;
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.main-footer a:hover {
+    text-decoration: underline;
+}
+
+@media (max-width: 600px) {
+    h1 {
+        font-size: 1.5rem;
+    }
+    .subtitle {
+        font-size: 1rem;
+    }
+    .main-btn {
+        font-size: 1rem;
+        padding: 0.9rem 1.5rem;
+    }
+}

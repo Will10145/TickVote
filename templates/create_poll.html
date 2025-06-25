@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Create Poll – TickVote</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css?family=Inter:400,600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .create-container {
+            max-width: 500px;
+            margin: 3rem auto 2rem auto;
+            background: #fff;
+            border-radius: 1rem;
+            box-shadow: 0 2px 16px rgba(44,62,80,0.07);
+            padding: 2rem 2.5rem;
+        }
+        .form-label {
+            font-weight: 600;
+            color: #2d3748;
+            margin-bottom: 0.5rem;
+            display: block;
+        }
+        .option-input-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 0.7rem;
+        }
+        .option-input-row input[type="text"] {
+            flex: 1;
+        }
+        .remove-option-btn {
+            margin-left: 0.5rem;
+            background: #e53e3e;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            padding: 0.3rem 0.7rem;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+        .remove-option-btn:hover {
+            background: #c53030;
+        }
+        .add-option-btn {
+            background: #38a169;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            font-size: 1rem;
+            margin-top: 0.5rem;
+        }
+        .add-option-btn:hover {
+            background: #2f855a;
+        }
+        .form-actions {
+            margin-top: 2rem;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="create-container">
+        <h1>Create a New Poll</h1>
+        {% if error %}
+            <p style="color:red;">{{ error }}</p>
+        {% endif %}
+        <form method="post" id="pollForm">
+            <label class="form-label">Question:</label>
+            <input type="text" name="question" required style="width:100%;margin-bottom:1.5rem;">
+            <label class="form-label">Options:</label>
+            <div id="optionsContainer">
+                <div class="option-input-row">
+                    <input type="text" name="options" required placeholder="Option 1">
+                </div>
+                <div class="option-input-row">
+                    <input type="text" name="options" required placeholder="Option 2">
+                </div>
+            </div>
+            <button type="button" class="add-option-btn" onclick="addOption()">Add Option</button>
+            <label class="form-label">Expiry (hours):</label>
+            <input type="number" name="expiry" min="1" max="168" value="24" required style="width:100%;margin-bottom:1.5rem;">
+            <div class="form-actions">
+                <div style="margin-bottom:1.5rem;">
+                    {% if RECAPTCHA_SITE_KEY %}
+                        <div class="g-recaptcha" data-sitekey="{{ RECAPTCHA_SITE_KEY }}"></div>
+                    {% else %}
+                        <div style="color:red;">reCAPTCHA site key not set.</div>
+                    {% endif %}
+                </div>
+                <button class="main-btn" type="submit">Create Poll</button>
+            </div>
+        </form>
+        <div class="form-actions">
+            <a href="{{ url_for('index') }}">Back to Home</a>
+        </div>
+    </div>
+    <script>
+        function addOption() {
+            const container = document.getElementById('optionsContainer');
+            const idx = container.children.length + 1;
+            const div = document.createElement('div');
+            div.className = 'option-input-row';
+            div.innerHTML = `<input type="text" name="options" required placeholder="Option ${idx}">
+                <button type="button" class="remove-option-btn" onclick="removeOption(this)">×</button>`;
+            container.appendChild(div);
+        }
+        function removeOption(btn) {
+            const container = document.getElementById('optionsContainer');
+            if (container.children.length > 2) {
+                btn.parentElement.remove();
+            }
+        }
+    </script>
+    <script src="https://www.google.com/recaptcha/api.js" async defer></script>
+</body>
+</html>

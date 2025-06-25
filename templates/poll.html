@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>{{ poll.question }} – TickVote</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css?family=Inter:400,600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .poll-container {
+            max-width: 500px;
+            margin: 3rem auto 2rem auto;
+            background: #fff;
+            border-radius: 1rem;
+            box-shadow: 0 2px 16px rgba(44,62,80,0.07);
+            padding: 2rem 2.5rem;
+        }
+        .option-row {
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+        }
+        .option-row label {
+            margin-left: 0.5rem;
+            color: #2d3748;
+            font-size: 1.1rem;
+        }
+        .vote-count {
+            color: #3182ce;
+            margin-left: 0.5rem;
+            font-size: 0.95rem;
+        }
+        .poll-actions {
+            margin-top: 2rem;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="poll-container">
+        <h1>{{ poll.question }}</h1>
+        {% if poll.expires_at %}
+            <div style="color:#718096;font-size:1rem;margin-bottom:1rem;">
+                Expires: {{ poll.expires_at.strftime('%Y-%m-%d %H:%M UTC') }}
+                {% if expired %}
+                    <span style="color:#e53e3e;font-weight:bold;">(Expired)</span>
+                {% endif %}
+                {% if paused %}
+                    <span style="color:#e53e3e;font-weight:bold;">(Paused)</span>
+                {% endif %}
+                {% if locked %}
+                    <span style="color:#e53e3e;font-weight:bold;">(Locked)</span>
+                {% endif %}
+            </div>
+        {% endif %}
+        <form method="post">
+            {% for option in poll.options %}
+                <div class="option-row">
+                    <input type="radio" name="option" value="{{ option.id }}" id="opt{{ option.id }}" required 
+                        {% if expired or paused or locked or already_voted %}disabled{% endif %}>
+                    <label for="opt{{ option.id }}">{{ option.text }}</label>
+                </div>
+            {% endfor %}
+            <div class="poll-actions">
+                <button class="main-btn" type="submit" 
+                    {% if expired or paused or locked or already_voted %}disabled{% endif %}>Vote</button>
+            </div>
+        </form>
+        {% if expired %}
+            <div style="color:#e53e3e;text-align:center;margin-top:1rem;">Voting is closed for this poll.</div>
+        {% elif paused %}
+            <div style="color:#e53e3e;text-align:center;margin-top:1rem;">Voting is paused for this poll.</div>
+        {% elif locked %}
+            <div style="color:#e53e3e;text-align:center;margin-top:1rem;">Voting is locked by admin.</div>
+        {% elif already_voted %}
+            <div style="color:#e53e3e;text-align:center;margin-top:1rem;">You have already voted in this poll.</div>
+        {% endif %}
+        <div class="poll-actions">
+            <a href="{{ url_for('dashboard') }}">Back to Dashboard</a>
+        </div>
+    </div>
+</body>
+</html>

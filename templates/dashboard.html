@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Dashboard – TickVote</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css?family=Inter:400,600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .dashboard-container {
+            max-width: 600px;
+            margin: 3rem auto 2rem auto;
+            background: #fff;
+            border-radius: 1rem;
+            box-shadow: 0 2px 16px rgba(44,62,80,0.07);
+            padding: 2rem 2.5rem;
+        }
+        .poll-list {
+            list-style: none;
+            padding: 0;
+        }
+        .poll-list li {
+            margin-bottom: 2rem;
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 1rem;
+        }
+        .poll-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #2d3748;
+            margin-bottom: 0.5rem;
+        }
+        .option-list {
+            margin: 0.5rem 0 0 0;
+            padding: 0;
+            list-style: none;
+        }
+        .option-list li {
+            color: #4a5568;
+            margin-bottom: 0.2rem;
+        }
+        .vote-link {
+            color: #3182ce;
+            text-decoration: none;
+            font-weight: 500;
+            margin-top: 0.5rem;
+            display: inline-block;
+        }
+        .vote-link:hover {
+            text-decoration: underline;
+        }
+        .dashboard-actions {
+            margin-top: 2rem;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <h1>Your Polls</h1>
+        <ul class="poll-list">
+            {% for poll in polls %}
+                <li>
+                    <div class="poll-title">
+                        <a class="vote-link" href="{{ url_for('view_poll_token', token=poll.token) }}">{{ poll.question }}</a>
+                    </div>
+                    <ul class="option-list">
+                        {% for option in poll.options %}
+                            <li>{{ option.text }}</li>
+                        {% endfor %}
+                    </ul>
+                    <a class="vote-link" href="{{ url_for('view_poll_token', token=poll.token) }}">Vote / View</a>
+                    <a class="vote-link" href="{{ url_for('poll_stats', stats_token=poll.stats_token) }}" style="margin-left:1rem;">View Stats</a>
+                </li>
+            {% else %}
+                <li>No polls yet.</li>
+            {% endfor %}
+        </ul>
+        <div class="dashboard-actions">
+            <a class="main-btn" href="{{ url_for('create_poll') }}">Create a new poll</a>
+            <br>
+            <a href="{{ url_for('index') }}">Back to Home</a>
+        </div>
+    </div>
+</body>
+</html>
