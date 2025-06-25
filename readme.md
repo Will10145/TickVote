@@ -14,7 +14,7 @@ Once you have editited the .env file, run this command in your terminal to set u
 ```bash
 git clone https://github.com/Will10145/TickVote.git
 cd TickVote
-bash setup.sh
+bash setup.sh {port}
 ```
 To start the flask server run
 ```bash
