@@ -57,6 +57,9 @@
 <body>
     <div class="dashboard-container">
         <h1>Your Polls</h1>
+        {% if error %}
+            <div style="color:#e53e3e;margin-bottom:1rem;">{{ error }}</div>
+        {% endif %}
         <ul class="poll-list">
             {% for poll in polls %}
                 <li>
@@ -72,13 +75,23 @@
                     <a class="vote-link" href="{{ url_for('poll_stats', stats_token=poll.stats_token) }}" style="margin-left:1rem;">View Stats</a>
                 </li>
             {% else %}
-                <li>No polls yet.</li>
+                <li>
+                    {% if show_login_prompt %}
+                        No polls yet. <a href="{{ url_for('create_poll') }}">Create your first poll</a> or <a href="{{ url_for('login') }}">login</a> to see existing polls.
+                    {% else %}
+                        No polls yet. <a href="{{ url_for('create_poll') }}">Create your first poll</a>!
+                    {% endif %}
+                </li>
             {% endfor %}
         </ul>
         <div class="dashboard-actions">
             <a class="main-btn" href="{{ url_for('create_poll') }}">Create a new poll</a>
             <br>
             <a href="{{ url_for('index') }}">Back to Home</a>
+            {% if show_login_prompt %}
+                <br><br>
+                <a href="{{ url_for('login') }}">Login</a> to sync polls across devices
+            {% endif %}
         </div>
     </div>
 </body>

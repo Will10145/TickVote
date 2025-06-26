@@ -34,10 +34,22 @@
         {% if error %}
             <p style="color:red;">{{ error }}</p>
         {% endif %}
+        
+        {% if firebase_uid and firebase_uid == admin_firebase_uid %}
+            <div style="background: #e6fffa; border: 1px solid #38b2ac; border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem; color: #234e52;">
+                <strong>✅ You have admin access!</strong><br>
+                <a href="/admin" style="color: #3182ce; text-decoration: none; font-weight: 600;">Go to Admin Dashboard</a>
+            </div>
+        {% endif %}
+        
         <form method="post">
             <input class="login-input" type="password" name="password" placeholder="Admin password" required>
             <button class="main-btn" type="submit">Login</button>
         </form>
+        
+        <div style="margin-top: 1.5rem; color: #718096; font-size: 0.9rem;">
+            Admin users can also access the dashboard by <a href="/login">logging in with their authorized Firebase account</a>.
+        </div>
     </div>
 </body>
 </html>

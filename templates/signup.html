@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+    <script src="https://www.google.com/recaptcha/api.js" async defer></script>
     <style>
         .signup-container {
             max-width: 400px;
@@ -29,10 +30,41 @@
             width: 100%;
             margin-bottom: 1rem;
         }
+        .recaptcha-container {
+            margin: 1rem 0;
+            display: flex;
+            justify-content: center;
+            min-height: 78px; /* Reserve space for reCAPTCHA */
+        }
+        .signup-btn-disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .recaptcha-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #718096;
+            font-size: 0.9rem;
+        }
         .divider {
-            margin: 2rem 0 1rem 0;
-            color: #a0aec0;
-            font-size: 1rem;
+            text-align: center;
+            margin: 1.5rem 0;
+            color: #718096;
+            position: relative;
+        }
+        .divider::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: #e2e8f0;
+        }
+        .divider span {
+            background: #fff;
+            padding: 0 1rem;
         }
     </style>
 </head>
@@ -42,12 +74,25 @@
         {% if error %}
             <div style="color:red;margin-bottom:1rem;">{{ error }}</div>
         {% endif %}
+        
+        <div style="background: #e6f3ff; border: 1px solid #3182ce; border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem; color: #1a365d; font-size: 0.9rem;">
+            <strong>� Secure Registration</strong><br>
+            After signing up, you'll need to verify your email address and complete reCAPTCHA verification to ensure account security.
+        </div>
+        
+        <!-- Firebase Signup -->
         <form id="firebase-signup-form" style="margin-bottom:1.5rem;" onsubmit="return false;">
             <input class="signup-input" type="email" id="firebase-signup-email" placeholder="Email" autocomplete="email" required>
-            <input class="signup-input" type="password" id="firebase-signup-password" placeholder="Password" autocomplete="new-password" required>
-            <button class="main-btn" id="firebase-signup-btn" type="button">Sign Up with Email</button>
+            <input class="signup-input" type="password" id="firebase-signup-password" placeholder="Password (minimum 6 characters)" autocomplete="new-password" required minlength="6">
+            <div class="recaptcha-container">
+                <div class="g-recaptcha" data-sitekey="{{ RECAPTCHA_SITE_KEY }}" data-callback="onSignupRecaptchaVerified" data-expired-callback="onSignupRecaptchaExpired"></div>
+            </div>
+            <div style="font-size: 0.8rem; color: #718096; text-align: center; margin-bottom: 1rem;">
+                Complete the reCAPTCHA above to enable the signup button
+            </div>
+            <button class="main-btn signup-btn-disabled" id="firebase-signup-btn" type="button" disabled>Sign Up with Email</button>
         </form>
-        <div class="divider">or</div>
+        
         <a href="{{ url_for('login') }}">Already have an account? Login</a>
         <div style="margin-top:2rem;">
             <a href="{{ url_for('index') }}">Back to Home</a>
@@ -66,35 +111,91 @@
         };
         firebase.initializeApp(firebaseConfig);
 
+        // reCAPTCHA callback functions
+        function onSignupRecaptchaVerified(response) {
+            const signupBtn = document.getElementById('firebase-signup-btn');
+            signupBtn.disabled = false;
+            signupBtn.classList.remove('signup-btn-disabled');
+            
+            // Update the helper text
+            const helperText = signupBtn.previousElementSibling;
+            if (helperText && helperText.textContent.includes('Complete the reCAPTCHA')) {
+                helperText.textContent = '✅ reCAPTCHA verified - you can now sign up';
+                helperText.style.color = '#38a169';
+            }
+        }
+
+        function onSignupRecaptchaExpired() {
+            const signupBtn = document.getElementById('firebase-signup-btn');
+            signupBtn.disabled = true;
+            signupBtn.classList.add('signup-btn-disabled');
+            
+            // Update the helper text
+            const helperText = signupBtn.previousElementSibling;
+            if (helperText) {
+                helperText.textContent = 'Complete the reCAPTCHA above to enable the signup button';
+                helperText.style.color = '#718096';
+            }
+        }
+
         document.getElementById('firebase-signup-btn').onclick = function() {
             const email = document.getElementById('firebase-signup-email').value;
             const password = document.getElementById('firebase-signup-password').value;
+            const recaptchaResponse = grecaptcha.getResponse();
+            
             if (!email || !password) {
                 alert('Please enter both email and password.');
                 return;
             }
-            firebase.auth().createUserWithEmailAndPassword(email, password)
-                .then(function(result) {
-                    return result.user.getIdToken();
-                })
-                .then(function(idToken) {
-                    return fetch('/login/firebase', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ idToken })
-                    });
-                })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.success) {
-                        window.location.href = '/dashboard';
-                    } else {
-                        alert('Signup failed: ' + (data.error || 'Unknown error'));
-                    }
-                })
-                .catch(function(error) {
+            
+            if (!recaptchaResponse) {
+                alert('Please complete the reCAPTCHA verification.');
+                return;
+            }
+            
+            // Disable the button to prevent double-clicking
+            const signupBtn = document.getElementById('firebase-signup-btn');
+            signupBtn.disabled = true;
+            signupBtn.textContent = 'Creating Account...';
+            
+            // Verify reCAPTCHA on server side
+            fetch('/verify-recaptcha', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ recaptchaResponse })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (!data.success) {
+                    throw new Error('reCAPTCHA verification failed');
+                }
+                
+                // Proceed with Firebase signup
+                return firebase.auth().createUserWithEmailAndPassword(email, password);
+            })
+            .then(function(result) {
+                // Send email verification
+                return result.user.sendEmailVerification();
+            })
+            .then(function() {
+                // Redirect to verification page
+                window.location.href = '/verify-email?email=' + encodeURIComponent(email);
+            })
+            .catch(function(error) {
+                // Re-enable the button
+                signupBtn.disabled = false;
+                signupBtn.textContent = 'Sign Up with Email';
+                signupBtn.classList.add('signup-btn-disabled');
+                
+                if (error.message.includes('reCAPTCHA')) {
+                    alert('reCAPTCHA verification failed. Please try again.');
+                } else {
                     alert('Signup failed: ' + error.message);
-                });
+                }
+                
+                grecaptcha.reset();
+                onSignupRecaptchaExpired();
+            });
         };
     </script>
 </body>

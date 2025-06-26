@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>Poll Deleted – TickVote</title>
+    <title>Account Disabled – TickVote</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="https://fonts.googleapis.com/css?family=Inter:400,600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
@@ -15,22 +15,33 @@
             padding: 2rem 2.5rem;
             text-align: center;
         }
-        .success-icon {
+        .warning-icon {
             font-size: 3rem;
-            color: #48bb78;
+            color: #f56565;
             margin-bottom: 1rem;
+        }
+        .message-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #2d3748;
+            margin-bottom: 1rem;
+        }
+        .message-text {
+            color: #4a5568;
+            line-height: 1.6;
+            margin-bottom: 2rem;
         }
     </style>
 </head>
 <body>
     <div class="message-container">
-        <div class="success-icon">✅</div>
-        <h1>Poll Deleted</h1>
-        <p>The poll has been successfully deleted.</p>
-        <div style="margin-top:2rem;">
-            <a class="main-btn" href="{{ url_for('create_poll') }}">Create a New Poll</a>
-            <br><br>
-            <a href="{{ url_for('index') }}">Back to Home</a>
+        <div class="warning-icon">⚠️</div>
+        <h1 class="message-title">Account Disabled</h1>
+        <p class="message-text">
+            Your account has been disabled. Please contact the administrator if you believe this is an error.
+        </p>
+        <div>
+            <a href="{{ url_for('index') }}" class="main-btn">Back to Home</a>
         </div>
     </div>
 </body>

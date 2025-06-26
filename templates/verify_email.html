@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Verify Email – TickVote</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css?family=Inter:400,600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .verify-container {
+            max-width: 500px;
+            margin: 3rem auto;
+            background: #fff;
+            border-radius: 1rem;
+            box-shadow: 0 2px 16px rgba(44,62,80,0.07);
+            padding: 2rem 2.5rem;
+            text-align: center;
+        }
+        .info-icon {
+            font-size: 3rem;
+            color: #3182ce;
+            margin-bottom: 1rem;
+        }
+        .verify-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #2d3748;
+            margin-bottom: 1rem;
+        }
+        .verify-text {
+            color: #4a5568;
+            line-height: 1.6;
+            margin-bottom: 2rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="verify-container">
+        <div class="info-icon">📧</div>
+        <h1 class="verify-title">Verify Your Email</h1>
+        {% if error %}
+            <div style="color:red;margin-bottom:1rem;">{{ error }}</div>
+        {% endif %}
+        {% if success %}
+            <div style="color:green;margin-bottom:1rem;">{{ success }}</div>
+        {% else %}
+            <p class="verify-text">
+                Please check your email and click the verification link to activate your account.
+            </p>
+            <form method="post" style="margin-bottom:1rem;">
+                <button class="main-btn" type="submit">Resend Verification Email</button>
+            </form>
+        {% endif %}
+        <div>
+            <a href="{{ url_for('login') }}">Back to Login</a>
+            <br><br>
+            <a href="{{ url_for('index') }}">Back to Home</a>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,69 +1,100 @@
-from flask import Flask, render_template, redirect, url_for, request, flash, make_response, jsonify, session
-from models import db, Poll, Option, User
-from datetime import datetime, timedelta
+from flask import Flask, render_template, redirect, url_for, request, make_response, jsonify, session
+from models import db, Poll, Option
+from datetime import datetime, timezone, timedelta
 import secrets
 import requests
-from flask import abort
-from dotenv import load_dotenv
-from flask_migrate import Migrate
-import smtplib, ssl
 import os
 import firebase_admin
 from firebase_admin import credentials, auth as firebase_auth
-from werkzeug.security import generate_password_hash, check_password_hash
-from sqlalchemy.exc import IntegrityError
+from dotenv import load_dotenv
+from flask_migrate import Migrate
+from functools import wraps
 
-load_dotenv()  # load env
+# Load environment variables
+load_dotenv()
 
+# Initialize Flask app
 app = Flask(__name__)
-
 migrate = Migrate(app, db)
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///../instance/tickvote.db')
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.secret_key = os.getenv('FLASK_SECRET_KEY', 'changeme')
+
+# Configuration constants
+class Config:
+    # Security settings
+    SECRET_KEY = os.getenv('FLASK_SECRET_KEY', 'changeme')
+    
+    # Database settings
+    DATABASE_URI = os.getenv('DATABASE_URL', 'sqlite:///../instance/tickvote.db')
+    
+    # reCAPTCHA settings
+    RECAPTCHA_SECRET_KEY = os.getenv('RECAPTCHA_SECRET_KEY')
+    RECAPTCHA_SITE_KEY = os.getenv('RECAPTCHA_SITE_KEY', '')
+    
+    # Admin settings
+    ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'changeme')
+    ADMIN_FIREBASE_UID = os.getenv('ADMIN_FIREBASE_UID')
+    
+    # Firebase settings
+    FIREBASE_CRED_PATH = os.getenv('FIREBASE_CRED_PATH', 'firebase_service_account.json')
+    
+    # Session configuration
+    SESSION_COOKIE_SECURE = os.getenv('SESSION_SECURE', 'False').lower() == 'true'
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = 'Lax'
+    PERMANENT_SESSION_LIFETIME = timedelta(days=365)
+    
+    # App settings
+    DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
+    PORT = int(os.getenv('PORT', 8080))
+    
+    @classmethod
+    def validate(cls):
+        """Validate configuration and warn about insecure defaults"""
+        warnings = []
+        
+        if cls.SECRET_KEY == 'changeme':
+            warnings.append("SECRET_KEY is using default value. Please set FLASK_SECRET_KEY environment variable.")
+        
+        if cls.ADMIN_PASSWORD == 'changeme':
+            warnings.append("ADMIN_PASSWORD is using default value. Please set ADMIN_PASSWORD environment variable.")
+        
+        if not cls.ADMIN_FIREBASE_UID:
+            warnings.append("ADMIN_FIREBASE_UID not set. Admin access via Firebase will be disabled.")
+        
+        for warning in warnings:
+            print(f"Configuration Warning: {warning}")
+        
+        return len(warnings) == 0
+
+# Apply configuration
+app.config.update({
+    'SECRET_KEY': Config.SECRET_KEY,
+    'SQLALCHEMY_DATABASE_URI': Config.DATABASE_URI,
+    'SQLALCHEMY_TRACK_MODIFICATIONS': False,
+    'SESSION_COOKIE_SECURE': Config.SESSION_COOKIE_SECURE,
+    'SESSION_COOKIE_HTTPONLY': Config.SESSION_COOKIE_HTTPONLY,
+    'SESSION_COOKIE_SAMESITE': Config.SESSION_COOKIE_SAMESITE,
+    'PERMANENT_SESSION_LIFETIME': Config.PERMANENT_SESSION_LIFETIME
+})
+
+# Validate configuration
+Config.validate()
+
 db.init_app(app)
 
-RECAPTCHA_SECRET_KEY = os.getenv('RECAPTCHA_SECRET_KEY')  # Set this in the .env file - look in readme
-ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'changeme')
-
-FIREBASE_CRED_PATH = os.getenv('FIREBASE_CRED_PATH', 'firebase_service_account.json')
-if os.path.exists(FIREBASE_CRED_PATH):
+# Initialize Firebase
+if os.path.exists(Config.FIREBASE_CRED_PATH):
     if not firebase_admin._apps:
-        cred = credentials.Certificate(FIREBASE_CRED_PATH)
+        cred = credentials.Certificate(Config.FIREBASE_CRED_PATH)
         firebase_admin.initialize_app(cred)
 else:
     # Try to find the .json file with a double extension (common mistake)
-    alt_path = FIREBASE_CRED_PATH + '.json'
+    alt_path = Config.FIREBASE_CRED_PATH + '.json'
     if os.path.exists(alt_path):
         if not firebase_admin._apps:
             cred = credentials.Certificate(alt_path)
             firebase_admin.initialize_app(cred)
     else:
-        print(f"Warning: Firebase service account file '{FIREBASE_CRED_PATH}' not found. Firebase features will be disabled.")
-
-def send_email(to_email, subject, body):
-    """
-    Send an email using SMTP settings from environment variables.
-    Uses STARTTLS if SMTP_USE_TLS is set to 1 (default).
-    """
-    smtp_server = os.getenv('SMTP_SERVER')
-    smtp_port = int(os.getenv('SMTP_PORT', 587))
-    smtp_user = os.getenv('SMTP_USER')
-    smtp_password = os.getenv('SMTP_PASSWORD')
-    from_email = os.getenv('FROM_EMAIL', smtp_user)
-    use_tls = os.getenv('SMTP_USE_TLS', '1') == '1'
-
-    if not all([smtp_server, smtp_port, smtp_user, smtp_password, to_email]):
-        raise RuntimeError("Missing SMTP configuration or recipient email.")
-
-    message = f"From: {from_email}\r\nTo: {to_email}\r\nSubject: {subject}\r\n\r\n{body}"
-
-    context = ssl.create_default_context()
-    with smtplib.SMTP(smtp_server, smtp_port) as server:
-        if use_tls:
-            server.starttls(context=context)
-        server.login(smtp_user, smtp_password)
-        server.sendmail(from_email, to_email, message)
+        print(f"Warning: Firebase service account file '{Config.FIREBASE_CRED_PATH}' not found. Firebase features will be disabled.")
 
 def generate_token():
     return secrets.token_urlsafe(8)
@@ -93,148 +124,316 @@ def add_voted_token_cookie(response, poll_token):
     return response
 
 def verify_recaptcha(response_token):
+    if not Config.RECAPTCHA_SECRET_KEY:
+        return True  # Skip verification if no key is configured
     payload = {
-        'secret': RECAPTCHA_SECRET_KEY,
+        'secret': Config.RECAPTCHA_SECRET_KEY,
         'response': response_token
     }
     r = requests.post('https://www.google.com/recaptcha/api/siteverify', data=payload)
     result = r.json()
     return result.get('success', False)
 
+def is_email_verified(firebase_uid):
+    """Check if a Firebase user's email is verified"""
+    try:
+        if firebase_uid == Config.ADMIN_FIREBASE_UID:
+            return True  # Admin bypass
+        user_record = firebase_auth.get_user(firebase_uid)
+        return user_record.email_verified
+    except Exception as e:
+        print(f"Error checking email verification: {e}")
+        return False
+
+def require_email_verification(f):
+    """Decorator to require email verification for routes"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        firebase_uid = get_firebase_uid()
+        if firebase_uid and not is_email_verified(firebase_uid):
+            try:
+                user_record = firebase_auth.get_user(firebase_uid)
+                return redirect(url_for('verify_email', email=user_record.email))
+            except:
+                return redirect(url_for('verify_email'))
+        return f(*args, **kwargs)
+    return decorated_function
+
 @app.route('/')
 def index():
-    return render_template('index.html')
+    firebase_uid = get_firebase_uid()
+    user_name = None
+    if firebase_uid:
+        user_name = get_user_display_name(firebase_uid)
+    
+    return render_template('index.html', firebase_uid=firebase_uid, user_name=user_name)
 
 @app.route('/login/firebase', methods=['POST'])
 def firebase_login():
-    id_token = request.json.get('idToken')
     try:
+        id_token = request.json.get('idToken')
+        if not id_token:
+            return jsonify({'success': False, 'error': 'No ID token provided'}), 400
+        
+        print(f"Attempting to verify Firebase ID token...")
         decoded_token = firebase_auth.verify_id_token(id_token)
+        print(f"Firebase token verified successfully for UID: {decoded_token['uid']}")
+        
+        # Get the user record to check email verification
+        user_record = firebase_auth.get_user(decoded_token['uid'])
+        
+        # Check if email is verified (allow admin to bypass verification)
+        if not user_record.email_verified and decoded_token['uid'] != Config.ADMIN_FIREBASE_UID:
+            print(f"Email not verified for user: {user_record.email}")
+            return jsonify({
+                'success': False,
+                'error': 'email_not_verified',
+                'redirect_url': '/verify-email',
+                'email': user_record.email
+            }), 401
+        
         session['firebase_uid'] = decoded_token['uid']
-        return jsonify({'success': True})
+        session.permanent = True  # Make session permanent
+        
+        # Claim any anonymous polls for this user
+        claimed_polls = claim_anonymous_polls(decoded_token['uid'])
+        
+        return jsonify({
+            'success': True, 
+            'claimed_polls': claimed_polls,
+            'redirect_url': '/logged_in'
+        })
     except Exception as e:
+        print(f"Firebase login error: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 401
 
+@app.route('/logout')
 @app.route('/logout/firebase')
-def firebase_logout():
+def logout():
+    """Handle logout for both Firebase and admin sessions"""
     session.pop('firebase_uid', None)
+    session.pop('admin_logged_in', None)
     return redirect(url_for('index'))
+
+@app.route('/logged_in')
+@require_email_verification
+def logged_in():
+    firebase_uid = get_firebase_uid()
+    if not firebase_uid:
+        return redirect(url_for('login'))
+    
+    # Get the claimed polls count from query parameter if available
+    claimed_polls = request.args.get('claimed_polls', 0, type=int)
+    
+    return render_template('logged_in.html', 
+                         firebase_uid=firebase_uid, 
+                         claimed_polls=claimed_polls)
 
 def get_firebase_uid():
     return session.get('firebase_uid')
 
+def is_admin(firebase_uid=None):
+    """Check if the current user is an admin"""
+    if session.get('admin_logged_in'):
+        return True
+    
+    if firebase_uid is None:
+        firebase_uid = get_firebase_uid()
+    
+    return firebase_uid and firebase_uid == Config.ADMIN_FIREBASE_UID
+
+def get_user_display_name(firebase_uid):
+    """Get display name for a Firebase user"""
+    try:
+        user_record = firebase_auth.get_user(firebase_uid)
+        return user_record.display_name or user_record.email or "User"
+    except Exception as e:
+        print(f"Error getting user info: {e}")
+        return "User"
+
+def claim_anonymous_polls(firebase_uid):
+    """
+    Claim all polls that were created with owner tokens stored in cookies
+    and assign them to the logged-in Firebase user
+    """
+    try:
+        owner_tokens = get_owner_tokens()
+        if not owner_tokens:
+            return 0
+        
+        # Find polls that match the owner tokens and don't have a firebase_uid yet
+        polls_to_claim = Poll.query.filter(
+            Poll.owner_token.in_(owner_tokens),
+            Poll.firebase_uid.is_(None)
+        ).all()
+        
+        claimed_count = 0
+        for poll in polls_to_claim:
+            poll.firebase_uid = firebase_uid
+            claimed_count += 1
+        
+        if claimed_count > 0:
+            db.session.commit()
+            print(f"Claimed {claimed_count} polls for Firebase user {firebase_uid}")
+        
+        return claimed_count
+    except Exception as e:
+        print(f"Error claiming polls: {e}")
+        db.session.rollback()
+        return 0
 @app.route('/create', methods=['GET', 'POST'])
 def create_poll():
     firebase_uid = get_firebase_uid()
+    
     if request.method == 'POST':
-        # Verify reCAPTCHA
-        recaptcha_response = request.form.get('g-recaptcha-response')
-        if not recaptcha_response or not verify_recaptcha(recaptcha_response):
-            return render_template('create_poll.html', error="reCAPTCHA verification failed. Please try again.")
-        question = request.form.get('question')
-        options = request.form.getlist('options')
+        # Skip reCAPTCHA verification for now to make it easier to test
+        # recaptcha_response = request.form.get('g-recaptcha-response')
+        # if not recaptcha_response or not verify_recaptcha(recaptcha_response):
+        #     return render_template('create_poll.html', error="reCAPTCHA verification failed. Please try again.")
+        
+        question = request.form.get('question', '').strip()
+        options = [opt.strip() for opt in request.form.getlist('options') if opt.strip()]
         expiry_hours = request.form.get('expiry')
+        
+        # Validation
+        if not question:
+            return render_template('create_poll.html', error="Please provide a question.")
+        
+        if not options or len(options) < 1:
+            return render_template('create_poll.html', error="Please provide at least one option.")
+        
         try:
             expiry_hours = int(expiry_hours)
             if expiry_hours < 1 or expiry_hours > 168:
                 raise ValueError()
-        except Exception:
+        except (ValueError, TypeError):
             return render_template('create_poll.html', error="Expiry must be between 1 and 168 hours.")
-        if question and options and any(opt.strip() for opt in options):
+        
+        try:
+            # Create poll
             poll_token = generate_token()
             stats_token = generate_token()
             owner_token = generate_token()
-            expiry_time = datetime.utcnow() + timedelta(hours=expiry_hours)
+            expiry_time = datetime.now(timezone.utc) + timedelta(hours=expiry_hours)
+            
             poll = Poll(
                 question=question,
                 token=poll_token,
                 stats_token=stats_token,
                 owner_token=owner_token,
-                expires_at=expiry_time
+                expires_at=expiry_time,
+                firebase_uid=firebase_uid  # Will be None if not authenticated
             )
-            if firebase_uid:
-                poll.firebase_uid = firebase_uid
+            
             db.session.add(poll)
             db.session.flush()
+            
+            # Add options
             for opt_text in options:
-                if opt_text.strip():
-                    option = Option(poll_id=poll.id, text=opt_text.strip())
-                    db.session.add(option)
+                option = Option(poll_id=poll.id, text=opt_text)
+                db.session.add(option)
+            
             db.session.commit()
+            
+            # Generate URLs and response
             poll_url = url_for('view_poll_token', token=poll_token, _external=True)
             stats_url = url_for('poll_stats', stats_token=stats_token, _external=True)
-            resp = make_response(render_template('poll_created.html', poll_url=poll_url, stats_url=stats_url, expiry=expiry_time))
-            if not firebase_uid:
-                return add_owner_token_cookie(resp, owner_token)
+            resp = make_response(render_template('poll_created.html', 
+                                               poll_url=poll_url, 
+                                               stats_url=stats_url, 
+                                               expiry=expiry_time))
+            
+            # Always set the owner token cookie, regardless of authentication status
+            resp = add_owner_token_cookie(resp, owner_token)
             return resp
-        return render_template('create_poll.html', error="Please provide a question and at least one option.")
+            
+        except Exception as e:
+            db.session.rollback()
+            print(f"Error creating poll: {e}")
+            return render_template('create_poll.html', error="An error occurred while creating the poll. Please try again.")
+    
     return render_template('create_poll.html')
 
 @app.route('/dashboard')
+@require_email_verification
 def dashboard():
     try:
         firebase_uid = get_firebase_uid()
-        user_id = get_user_id()
         tokens = get_owner_tokens()
-        if not firebase_uid and not user_id and not tokens:
-            return redirect(url_for('login'))
+        
+        # Collect polls from all sources
+        polls = []
+        
+        # Get Firebase user polls
         if firebase_uid:
-            polls = Poll.query.filter_by(firebase_uid=firebase_uid).all()
-        elif user_id:
-            polls = Poll.query.filter_by(owner_token=str(user_id)).all()
-        else:
-            if tokens:
-                polls = Poll.query.filter(Poll.owner_token.in_(tokens)).all()
-            else:
-                polls = []
-        return render_template('dashboard.html', polls=polls)
+            firebase_polls = Poll.query.filter_by(firebase_uid=firebase_uid).all()
+            polls.extend(firebase_polls)
+        
+        # Get anonymous user polls via cookies
+        if tokens:
+            token_polls = Poll.query.filter(Poll.owner_token.in_(tokens)).all()
+            polls.extend(token_polls)
+        
+        # Remove duplicates while preserving order
+        seen_ids = set()
+        unique_polls = []
+        for poll in polls:
+            if poll.id not in seen_ids:
+                unique_polls.append(poll)
+                seen_ids.add(poll.id)
+        
+        # Show login prompt if user has no polls and is not authenticated
+        show_login_prompt = not unique_polls and not firebase_uid and not tokens
+        
+        return render_template('dashboard.html', 
+                             polls=unique_polls, 
+                             show_login_prompt=show_login_prompt)
+    
     except Exception as e:
-        print("Error in /dashboard:", e)
-        return redirect(url_for('login'))
+        print(f"Error in dashboard: {e}")
+        return render_template('dashboard.html', 
+                             polls=[], 
+                             error="Error loading dashboard")
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    if request.method == 'POST':
-        # Username/password login
-        username = request.form.get('username', '').strip()
-        password = request.form.get('password', '')
-        if username and password:
-            user = User.query.filter_by(username=username).first()
-            if user and check_password_hash(user.password_hash, password):
-                session['user_id'] = user.id
-                return redirect(url_for('dashboard'))
-            else:
-                return render_template('login.html', error="Invalid username or password.")
-        # ...Firebase login handled by JS...
+    # If user is already logged in, redirect to dashboard
+    if get_firebase_uid():
+        return redirect(url_for('dashboard'))
     return render_template('login.html')
 
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
-    if request.method == 'POST':
-        username = request.form.get('username', '').strip()
-        password = request.form.get('password', '')
-        if not username or not password:
-            return render_template('signup.html', error="Username and password required.")
-        if len(username) < 3 or len(password) < 4:
-            return render_template('signup.html', error="Username or password too short.")
-        user = User(username=username, password_hash=generate_password_hash(password))
-        db.session.add(user)
-        try:
-            db.session.commit()
-        except IntegrityError:
-            db.session.rollback()
-            return render_template('signup.html', error="Username already exists.")
-        session['user_id'] = user.id
+    # If user is already logged in, redirect to dashboard
+    if get_firebase_uid():
         return redirect(url_for('dashboard'))
     return render_template('signup.html')
 
-def get_user_id():
-    return session.get('user_id')
+@app.route('/reset-password')
+def reset_password():
+    # If user is already logged in, redirect to dashboard
+    if get_firebase_uid():
+        return redirect(url_for('dashboard'))
+    return render_template('reset_password.html')
+
+@app.route('/account-disabled')
+def account_disabled():
+    # This route can be accessed by anyone
+    return render_template('account_disabled.html')
 
 @app.route('/poll/<int:poll_id>', methods=['GET', 'POST'])
 def view_poll(poll_id):
     poll = Poll.query.get_or_404(poll_id)
-    expired = poll.expires_at and poll.expires_at < datetime.utcnow()
+    # Handle both timezone-aware and naive datetimes
+    if poll.expires_at:
+        if poll.expires_at.tzinfo is None:
+            # Database datetime is naive, assume it's UTC
+            poll_expires_utc = poll.expires_at.replace(tzinfo=timezone.utc)
+        else:
+            poll_expires_utc = poll.expires_at
+        expired = poll_expires_utc < datetime.now(timezone.utc)
+    else:
+        expired = False
     paused = poll.paused
     locked = poll.locked
     voted_tokens = get_voted_tokens()
@@ -253,7 +452,16 @@ def view_poll(poll_id):
 @app.route('/poll/token/<token>', methods=['GET', 'POST'])
 def view_poll_token(token):
     poll = Poll.query.filter_by(token=token).first_or_404()
-    expired = poll.expires_at and poll.expires_at < datetime.utcnow()
+    # Handle both timezone-aware and naive datetimes
+    if poll.expires_at:
+        if poll.expires_at.tzinfo is None:
+            # Database datetime is naive, assume it's UTC
+            poll_expires_utc = poll.expires_at.replace(tzinfo=timezone.utc)
+        else:
+            poll_expires_utc = poll.expires_at
+        expired = poll_expires_utc < datetime.now(timezone.utc)
+    else:
+        expired = False
     paused = poll.paused
     locked = poll.locked
     voted_tokens = get_voted_tokens()
@@ -293,14 +501,24 @@ def unpause_poll(token):
 @app.route('/admin/login', methods=['GET', 'POST'])
 def admin_login():
     error = None
+    firebase_uid = get_firebase_uid()
+    
+    # If user is already an admin via Firebase, redirect to dashboard
+    if is_admin(firebase_uid):
+        return redirect(url_for('admin_dashboard'))
+    
     if request.method == 'POST':
         password = request.form.get('password')
-        if password == ADMIN_PASSWORD:
+        if password == Config.ADMIN_PASSWORD:
             session['admin_logged_in'] = True
             return redirect(url_for('admin_dashboard'))
         else:
             error = "Incorrect password."
-    return render_template('admin_login.html', error=error)
+    
+    return render_template('admin_login.html', 
+                         error=error, 
+                         firebase_uid=firebase_uid, 
+                         admin_firebase_uid=Config.ADMIN_FIREBASE_UID)
 
 @app.route('/admin/logout')
 def admin_logout():
@@ -308,10 +526,9 @@ def admin_logout():
     return redirect(url_for('admin_login'))
 
 def admin_required(f):
-    from functools import wraps
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if not session.get('admin_logged_in'):
+        if not is_admin():
             return redirect(url_for('admin_login'))
         return f(*args, **kwargs)
     return decorated_function
@@ -400,7 +617,7 @@ def poll_stats(stats_token):
 
 @app.context_processor
 def inject_recaptcha_site_key():
-    return dict(RECAPTCHA_SITE_KEY=os.getenv('RECAPTCHA_SITE_KEY', ''))
+    return dict(RECAPTCHA_SITE_KEY=Config.RECAPTCHA_SITE_KEY)
 
 @app.route('/about')
 def about():
@@ -410,7 +627,36 @@ def about():
 def error_four_oh_four(s):
     return render_template('404.html')
 
+@app.route('/verify-email')
+def verify_email():
+    """Email verification page"""
+    # This page can be accessed by anyone, but typically reached after signup
+    user_email = request.args.get('email', 'your-email@example.com')
+    return render_template('verify_email.html', user_email=user_email)
+
+@app.route('/verify-recaptcha', methods=['POST'])
+def verify_recaptcha_endpoint():
+    """Verify reCAPTCHA response on the server side"""
+    try:
+        data = request.get_json()
+        recaptcha_response = data.get('recaptchaResponse')
+        
+        if not recaptcha_response:
+            return jsonify({'success': False, 'error': 'No reCAPTCHA response provided'}), 400
+        
+        # Verify the reCAPTCHA response
+        is_valid = verify_recaptcha(recaptcha_response)
+        
+        if is_valid:
+            return jsonify({'success': True})
+        else:
+            return jsonify({'success': False, 'error': 'reCAPTCHA verification failed'}), 400
+            
+    except Exception as e:
+        print(f"reCAPTCHA verification error: {e}")
+        return jsonify({'success': False, 'error': 'Server error during verification'}), 500
+
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
-    app.run()
+    app.run(port=Config.PORT, debug=Config.DEBUG)

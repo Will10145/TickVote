@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+    <script src="https://www.google.com/recaptcha/api.js" async defer></script>
     <style>
         .login-container {
             max-width: 400px;
@@ -30,25 +31,72 @@
             margin-bottom: 1rem;
         }
         .divider {
-            margin: 2rem 0 1rem 0;
-            color: #a0aec0;
-            font-size: 1rem;
+            text-align: center;
+            margin: 1.5rem 0;
+            color: #718096;
+            position: relative;
+        }
+        .divider::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: #e2e8f0;
+        }
+        .divider span {
+            background: #fff;
+            padding: 0 1rem;
+        }
+        .recaptcha-container {
+            margin: 1rem 0;
+            display: flex;
+            justify-content: center;
+            min-height: 78px; /* Reserve space for reCAPTCHA */
+        }
+        .login-btn-disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        .recaptcha-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #718096;
+            font-size: 0.9rem;
         }
     </style>
 </head>
 <body>
     <div class="login-container">
         <h1>Login to See Your Polls</h1>
+        
+        <div style="background: #f0f8ff; border: 1px solid #3182ce; border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem; color: #1a365d; font-size: 0.9rem; text-align: left;">
+            <strong>� Enhanced Security</strong><br>
+            We use email verification and reCAPTCHA to keep your account secure. If you recently signed up, make sure to verify your email address before logging in.
+        </div>
+        
+        <!-- Firebase Login -->
         <div id="firebase-login-area">
             <button class="main-btn" id="firebase-google-login-btn" type="button">Login with Google</button>
+            <div class="divider"><span>OR</span></div>
             <div style="margin-top:1rem;">
                 <input class="login-input" type="email" id="firebase-email" placeholder="Email" autocomplete="email">
                 <input class="login-input" type="password" id="firebase-password" placeholder="Password" autocomplete="current-password">
-                <button class="main-btn" id="firebase-email-login-btn" type="button">Login with Email</button>
+                <div class="recaptcha-container">
+                    <div class="g-recaptcha" data-sitekey="{{ RECAPTCHA_SITE_KEY }}" data-callback="onRecaptchaVerified" data-expired-callback="onRecaptchaExpired"></div>
+                </div>
+                <div style="font-size: 0.8rem; color: #718096; text-align: center; margin-bottom: 1rem;">
+                    Complete the reCAPTCHA above to enable the login button
+                </div>
+                <button class="main-btn login-btn-disabled" id="firebase-email-login-btn" type="button" disabled>Login with Email</button>
             </div>
         </div>
         <div style="margin-top:1.5rem;">
             <a href="{{ url_for('signup') }}">Don't have an account? Sign up</a>
+            <span style="margin: 0 0.5rem;">•</span>
+            <a href="{{ url_for('reset_password') }}">Forgot password?</a>
         </div>
         <div style="margin-top:2rem;">
             <a href="{{ url_for('index') }}">Back to Home</a>
@@ -67,6 +115,54 @@
         };
         firebase.initializeApp(firebaseConfig);
 
+        // reCAPTCHA callback functions
+        function onRecaptchaVerified(response) {
+            const loginBtn = document.getElementById('firebase-email-login-btn');
+            loginBtn.disabled = false;
+            loginBtn.classList.remove('login-btn-disabled');
+            
+            // Update the helper text
+            const helperText = loginBtn.previousElementSibling;
+            if (helperText && helperText.textContent.includes('Complete the reCAPTCHA')) {
+                helperText.textContent = '✅ reCAPTCHA verified - you can now log in';
+                helperText.style.color = '#38a169';
+            }
+        }
+
+        function onRecaptchaExpired() {
+            const loginBtn = document.getElementById('firebase-email-login-btn');
+            loginBtn.disabled = true;
+            loginBtn.classList.add('login-btn-disabled');
+            
+            // Update the helper text
+            const helperText = loginBtn.previousElementSibling;
+            if (helperText) {
+                helperText.textContent = 'Complete the reCAPTCHA above to enable the login button';
+                helperText.style.color = '#718096';
+            }
+        }
+
+        function handleLoginSuccess(data) {
+            if (data.success) {
+                if (data.redirect_url) {
+                    const url = data.claimed_polls > 0 ? 
+                        `${data.redirect_url}?claimed_polls=${data.claimed_polls}` : 
+                        data.redirect_url;
+                    window.location.href = url;
+                } else {
+                    window.location.href = '/dashboard';
+                }
+            } else {
+                if (data.error === 'email_not_verified') {
+                    // Redirect to email verification page
+                    const verifyUrl = data.redirect_url + (data.email ? `?email=${encodeURIComponent(data.email)}` : '');
+                    window.location.href = verifyUrl;
+                } else {
+                    alert('Login failed: ' + (data.error || 'Unknown error'));
+                }
+            }
+        }
+
         document.getElementById('firebase-google-login-btn').onclick = function() {
             const provider = new firebase.auth.GoogleAuthProvider();
             firebase.auth().signInWithPopup(provider)
@@ -81,14 +177,12 @@
                     });
                 })
                 .then(res => res.json())
-                .then(data => {
-                    if (data.success) {
-                        window.location.href = '/dashboard';
-                    } else {
-                        alert('Login failed: ' + (data.error || 'Unknown error'));
-                    }
-                })
+                .then(handleLoginSuccess)
                 .catch(function(error) {
+                    if (error.code === 'auth/popup-closed-by-user') {
+                        // User closed the popup, do nothing
+                        return;
+                    }
                     alert('Login failed: ' + error.message);
                 });
         };
@@ -96,36 +190,59 @@
         document.getElementById('firebase-email-login-btn').onclick = function() {
             const email = document.getElementById('firebase-email').value;
             const password = document.getElementById('firebase-password').value;
+            const recaptchaResponse = grecaptcha.getResponse();
+            
             if (!email || !password) {
                 alert('Please enter both email and password.');
                 return;
             }
-            firebase.auth().signInWithEmailAndPassword(email, password)
-                .then(function(result) {
-                    return result.user.getIdToken();
-                })
-                .then(function(idToken) {
-                    return fetch('/login/firebase', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ idToken })
+            
+            if (!recaptchaResponse) {
+                alert('Please complete the reCAPTCHA verification.');
+                return;
+            }
+            
+            // Verify reCAPTCHA on server side
+            fetch('/verify-recaptcha', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ recaptchaResponse })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (!data.success) {
+                    alert('reCAPTCHA verification failed. Please try again.');
+                    grecaptcha.reset();
+                    onRecaptchaExpired();
+                    return;
+                }
+                
+                // Proceed with Firebase login
+                firebase.auth().signInWithEmailAndPassword(email, password)
+                    .then(function(result) {
+                        return result.user.getIdToken();
+                    })
+                    .then(function(idToken) {
+                        return fetch('/login/firebase', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ idToken })
+                        });
+                    })
+                    .then(res => res.json())
+                    .then(handleLoginSuccess)
+                    .catch(function(error) {
+                        alert('Login failed: ' + error.message);
+                        grecaptcha.reset();
+                        onRecaptchaExpired();
                     });
-                })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.success) {
-                        window.location.href = '/dashboard';
-                    } else {
-                        alert('Login failed: ' + (data.error || 'Unknown error'));
-                    }
-                })
-                .catch(function(error) {
-                    alert('Login failed: ' + error.message);
-                });
+            })
+            .catch(function(error) {
+                alert('reCAPTCHA verification error: ' + error.message);
+                grecaptcha.reset();
+                onRecaptchaExpired();
+            });
         };
     </script>
-</body>
-</html>
-
 </body>
 </html>

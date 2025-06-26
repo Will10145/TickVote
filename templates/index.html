@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>TickVote – Simple Poll Maker</title>
+    <title>TickVote – Simple Poll Maker - BETA</title>
     <meta name="description" content="Create and share polls instantly with TickVote.">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="https://fonts.googleapis.com/css?family=Inter:400,600&display=swap" rel="stylesheet">
@@ -20,6 +20,39 @@
     <button class="main-btn" onclick="window.location.href='/create'">
         Create a Poll
     </button>
+    <div class="auth-buttons" style="margin-top: 1rem;">
+        {% if firebase_uid %}
+            <div class="welcome-message" style="text-align: center; margin-bottom: 1rem;">
+                {% if firebase_uid == 'ni19KIo3l5SUknteZNbXK8q56MF3' %}
+                    <span style="font-size: 1.3rem; color: #e53e3e; font-weight: 600;">
+                        Hello admin 👑, {{ user_name }}!
+                    </span>
+                {% else %}
+                    <span style="font-size: 1.3rem; color: #2d3748; font-weight: 600;">
+                        Hello 👋, {{ user_name }}!
+                    </span>
+                {% endif %}
+            </div>
+            <button class="secondary-btn" onclick="window.location.href='/dashboard'">
+                My Dashboard
+            </button>
+            {% if firebase_uid == 'ni19KIo3l5SUknteZNbXK8q56MF3' %}
+                <button class="secondary-btn" onclick="window.location.href='/admin'" style="background: #e53e3e; border-color: #e53e3e; color: #fff;">
+                    Admin
+                </button>
+            {% endif %}
+            <button class="secondary-btn" onclick="window.location.href='/logout'">
+                Logout
+            </button>
+        {% else %}
+            <button class="secondary-btn" onclick="window.location.href='/login'">
+                Login
+            </button>
+            <button class="secondary-btn" onclick="window.location.href='/signup'">
+                Sign Up
+            </button>
+        {% endif %}
+    </div>
     <div class="main-footer">
         <span>Want to see your polls?</span>
         <a href="/dashboard">Go to The Dashboard</a>
