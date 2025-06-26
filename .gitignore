@@ -4,3 +4,4 @@
 __pycache__
 instance
 .DS_Store
+firebase_service_account.json

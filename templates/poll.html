@@ -56,13 +56,13 @@
             {% for option in poll.options %}
                 <div class="option-row">
                     <input type="radio" name="option" value="{{ option.id }}" id="opt{{ option.id }}" required 
-                        {% if expired or paused or locked or already_voted %}disabled{% endif %}>
+                        {% if expired or paused or locked or (already_voted and not request.method == 'POST') %}disabled{% endif %}>
                     <label for="opt{{ option.id }}">{{ option.text }}</label>
                 </div>
             {% endfor %}
             <div class="poll-actions">
                 <button class="main-btn" type="submit" 
-                    {% if expired or paused or locked or already_voted %}disabled{% endif %}>Vote</button>
+                    {% if expired or paused or locked or (already_voted and not request.method == 'POST') %}disabled{% endif %}>Vote</button>
             </div>
         </form>
         {% if expired %}
@@ -71,7 +71,9 @@
             <div style="color:#e53e3e;text-align:center;margin-top:1rem;">Voting is paused for this poll.</div>
         {% elif locked %}
             <div style="color:#e53e3e;text-align:center;margin-top:1rem;">Voting is locked by admin.</div>
-        {% elif already_voted %}
+        {% elif just_voted %}
+            <div style="color:#38a169;text-align:center;margin-top:1rem;">Thank you for voting!</div>
+        {% elif tried_to_vote_again %}
             <div style="color:#e53e3e;text-align:center;margin-top:1rem;">You have already voted in this poll.</div>
         {% endif %}
         <div class="poll-actions">

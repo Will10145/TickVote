@@ -1,12 +1,17 @@
 from flask import Flask, render_template, redirect, url_for, request, flash, make_response, jsonify, session
-from models import db, Poll, Option
+from models import db, Poll, Option, User
 from datetime import datetime, timedelta
 import secrets
 import requests
 from flask import abort
 from dotenv import load_dotenv
 from flask_migrate import Migrate
+import smtplib, ssl
 import os
+import firebase_admin
+from firebase_admin import credentials, auth as firebase_auth
+from werkzeug.security import generate_password_hash, check_password_hash
+from sqlalchemy.exc import IntegrityError
 
 load_dotenv()  # load env
 
@@ -20,6 +25,45 @@ db.init_app(app)
 
 RECAPTCHA_SECRET_KEY = os.getenv('RECAPTCHA_SECRET_KEY')  # Set this in the .env file - look in readme
 ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', 'changeme')
+
+FIREBASE_CRED_PATH = os.getenv('FIREBASE_CRED_PATH', 'firebase_service_account.json')
+if os.path.exists(FIREBASE_CRED_PATH):
+    if not firebase_admin._apps:
+        cred = credentials.Certificate(FIREBASE_CRED_PATH)
+        firebase_admin.initialize_app(cred)
+else:
+    # Try to find the .json file with a double extension (common mistake)
+    alt_path = FIREBASE_CRED_PATH + '.json'
+    if os.path.exists(alt_path):
+        if not firebase_admin._apps:
+            cred = credentials.Certificate(alt_path)
+            firebase_admin.initialize_app(cred)
+    else:
+        print(f"Warning: Firebase service account file '{FIREBASE_CRED_PATH}' not found. Firebase features will be disabled.")
+
+def send_email(to_email, subject, body):
+    """
+    Send an email using SMTP settings from environment variables.
+    Uses STARTTLS if SMTP_USE_TLS is set to 1 (default).
+    """
+    smtp_server = os.getenv('SMTP_SERVER')
+    smtp_port = int(os.getenv('SMTP_PORT', 587))
+    smtp_user = os.getenv('SMTP_USER')
+    smtp_password = os.getenv('SMTP_PASSWORD')
+    from_email = os.getenv('FROM_EMAIL', smtp_user)
+    use_tls = os.getenv('SMTP_USE_TLS', '1') == '1'
+
+    if not all([smtp_server, smtp_port, smtp_user, smtp_password, to_email]):
+        raise RuntimeError("Missing SMTP configuration or recipient email.")
+
+    message = f"From: {from_email}\r\nTo: {to_email}\r\nSubject: {subject}\r\n\r\n{body}"
+
+    context = ssl.create_default_context()
+    with smtplib.SMTP(smtp_server, smtp_port) as server:
+        if use_tls:
+            server.starttls(context=context)
+        server.login(smtp_user, smtp_password)
+        server.sendmail(from_email, to_email, message)
 
 def generate_token():
     return secrets.token_urlsafe(8)
@@ -61,8 +105,27 @@ def verify_recaptcha(response_token):
 def index():
     return render_template('index.html')
 
+@app.route('/login/firebase', methods=['POST'])
+def firebase_login():
+    id_token = request.json.get('idToken')
+    try:
+        decoded_token = firebase_auth.verify_id_token(id_token)
+        session['firebase_uid'] = decoded_token['uid']
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 401
+
+@app.route('/logout/firebase')
+def firebase_logout():
+    session.pop('firebase_uid', None)
+    return redirect(url_for('index'))
+
+def get_firebase_uid():
+    return session.get('firebase_uid')
+
 @app.route('/create', methods=['GET', 'POST'])
 def create_poll():
+    firebase_uid = get_firebase_uid()
     if request.method == 'POST':
         # Verify reCAPTCHA
         recaptcha_response = request.form.get('g-recaptcha-response')
@@ -89,6 +152,8 @@ def create_poll():
                 owner_token=owner_token,
                 expires_at=expiry_time
             )
+            if firebase_uid:
+                poll.firebase_uid = firebase_uid
             db.session.add(poll)
             db.session.flush()
             for opt_text in options:
@@ -99,18 +164,72 @@ def create_poll():
             poll_url = url_for('view_poll_token', token=poll_token, _external=True)
             stats_url = url_for('poll_stats', stats_token=stats_token, _external=True)
             resp = make_response(render_template('poll_created.html', poll_url=poll_url, stats_url=stats_url, expiry=expiry_time))
-            return add_owner_token_cookie(resp, owner_token)
+            if not firebase_uid:
+                return add_owner_token_cookie(resp, owner_token)
+            return resp
         return render_template('create_poll.html', error="Please provide a question and at least one option.")
     return render_template('create_poll.html')
 
 @app.route('/dashboard')
 def dashboard():
-    tokens = get_owner_tokens()
-    if tokens:
-        polls = Poll.query.filter(Poll.owner_token.in_(tokens)).all()
-    else:
-        polls = []
-    return render_template('dashboard.html', polls=polls)
+    try:
+        firebase_uid = get_firebase_uid()
+        user_id = get_user_id()
+        tokens = get_owner_tokens()
+        if not firebase_uid and not user_id and not tokens:
+            return redirect(url_for('login'))
+        if firebase_uid:
+            polls = Poll.query.filter_by(firebase_uid=firebase_uid).all()
+        elif user_id:
+            polls = Poll.query.filter_by(owner_token=str(user_id)).all()
+        else:
+            if tokens:
+                polls = Poll.query.filter(Poll.owner_token.in_(tokens)).all()
+            else:
+                polls = []
+        return render_template('dashboard.html', polls=polls)
+    except Exception as e:
+        print("Error in /dashboard:", e)
+        return redirect(url_for('login'))
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        # Username/password login
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+        if username and password:
+            user = User.query.filter_by(username=username).first()
+            if user and check_password_hash(user.password_hash, password):
+                session['user_id'] = user.id
+                return redirect(url_for('dashboard'))
+            else:
+                return render_template('login.html', error="Invalid username or password.")
+        # ...Firebase login handled by JS...
+    return render_template('login.html')
+
+@app.route('/signup', methods=['GET', 'POST'])
+def signup():
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+        if not username or not password:
+            return render_template('signup.html', error="Username and password required.")
+        if len(username) < 3 or len(password) < 4:
+            return render_template('signup.html', error="Username or password too short.")
+        user = User(username=username, password_hash=generate_password_hash(password))
+        db.session.add(user)
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            return render_template('signup.html', error="Username already exists.")
+        session['user_id'] = user.id
+        return redirect(url_for('dashboard'))
+    return render_template('signup.html')
+
+def get_user_id():
+    return session.get('user_id')
 
 @app.route('/poll/<int:poll_id>', methods=['GET', 'POST'])
 def view_poll(poll_id):
@@ -139,16 +258,23 @@ def view_poll_token(token):
     locked = poll.locked
     voted_tokens = get_voted_tokens()
     already_voted = poll.token in voted_tokens
+    just_voted = False
     can_vote = not (expired or paused or locked or already_voted)
-    if request.method == 'POST' and can_vote:
-        option_id = request.form.get('option')
-        option = Option.query.filter_by(id=option_id, poll_id=poll.id).first()
-        if option:
-            option.votes += 1
-            db.session.commit()
-        resp = make_response(redirect(url_for('view_poll_token', token=token)))
-        return add_voted_token_cookie(resp, poll.token)
-    return render_template('poll.html', poll=poll, expired=expired, paused=paused, locked=locked, already_voted=already_voted)
+    if request.method == 'POST':
+        if can_vote:
+            option_id = request.form.get('option')
+            option = Option.query.filter_by(id=option_id, poll_id=poll.id).first()
+            if option:
+                option.votes += 1
+                db.session.commit()
+            resp = make_response(redirect(url_for('view_poll_token', token=token, voted='1')))
+            return add_voted_token_cookie(resp, poll.token)
+        else:
+            # User tried to vote again
+            return render_template('poll.html', poll=poll, expired=expired, paused=paused, locked=locked, already_voted=already_voted, tried_to_vote_again=True)
+    # Check if redirected after voting
+    just_voted = request.args.get('voted') == '1'
+    return render_template('poll.html', poll=poll, expired=expired, paused=paused, locked=locked, already_voted=already_voted, just_voted=just_voted)
 
 @app.route('/poll/token/<token>/pause', methods=['POST'])
 def pause_poll(token):
