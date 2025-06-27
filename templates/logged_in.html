@@ -1,49 +1,88 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>Logged In – TickVote</title>
+    <title>Welcome – TickVote</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="https://fonts.googleapis.com/css?family=Inter:400,600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <style>
-        .success-container {
-            max-width: 500px;
-            margin: 3rem auto;
+        .welcome-container {
+            max-width: 600px;
+            margin: 3rem auto 2rem auto;
             background: #fff;
             border-radius: 1rem;
             box-shadow: 0 2px 16px rgba(44,62,80,0.07);
             padding: 2rem 2.5rem;
             text-align: center;
         }
-        .success-icon {
-            font-size: 3rem;
-            color: #48bb78;
-            margin-bottom: 1rem;
-        }
-        .success-title {
-            font-size: 1.5rem;
-            font-weight: 600;
+        .welcome-message {
             color: #2d3748;
-            margin-bottom: 1rem;
-        }
-        .success-text {
-            color: #4a5568;
-            line-height: 1.6;
+            font-size: 1.3rem;
             margin-bottom: 2rem;
+            line-height: 1.6;
+        }
+        .user-info {
+            background: #f7fafc;
+            border-radius: 8px;
+            padding: 1rem;
+            margin: 1.5rem 0;
+            color: #4a5568;
+        }
+        .action-buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin: 2rem 0;
+        }
+        .action-buttons .main-btn,
+        .action-buttons .secondary-btn {
+            margin: 0;
+            min-width: 140px;
+        }
+        .claimed-polls {
+            background: #e6fffa;
+            border: 1px solid #38b2ac;
+            border-radius: 8px;
+            padding: 1rem;
+            margin: 1.5rem 0;
+            color: #234e52;
         }
     </style>
 </head>
 <body>
-    <div class="success-container">
-        <div class="success-icon">✅</div>
-        <h1 class="success-title">Successfully Logged In</h1>
-        <p class="success-text">
-            Welcome back! You are now logged in to your TickVote account.
-        </p>
-        <div>
-            <a href="{{ url_for('dashboard') }}" class="main-btn">Go to Dashboard</a>
-            <br><br>
-            <a href="{{ url_for('index') }}">Back to Home</a>
+    <div class="welcome-container">
+        <h1>Welcome to TickVote!</h1>
+        
+        {% if firebase_uid %}
+            <div class="user-info">
+                <strong>You are logged in with Firebase</strong><br>
+                User ID: {{ firebase_uid }}
+            </div>
+        {% endif %}
+        
+        <div class="welcome-message">
+            {% if claimed_polls > 0 %}
+                🎉 Great news! We've claimed {{ claimed_polls }} poll(s) from your anonymous sessions and linked them to your account.
+            {% else %}
+                You're all set! Your polls will now be automatically saved to your account.
+            {% endif %}
+        </div>
+        
+        <div class="action-buttons">
+            <button class="main-btn" onclick="window.location.href='/create'">
+                Create New Poll
+            </button>
+            <button class="secondary-btn" onclick="window.location.href='/dashboard'">
+                View Dashboard
+            </button>
+            <button class="secondary-btn" onclick="window.location.href='/'">
+                Home
+            </button>
+        </div>
+        
+        <div style="margin-top: 2rem; color: #718096;">
+            <a href="/logout">Logout</a>
         </div>
     </div>
 </body>

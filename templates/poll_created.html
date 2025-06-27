@@ -6,7 +6,7 @@
     <link href="https://fonts.googleapis.com/css?family=Inter:400,600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <style>
-        .success-container {
+        .created-container {
             max-width: 500px;
             margin: 3rem auto 2rem auto;
             background: #fff;
@@ -15,79 +15,46 @@
             padding: 2rem 2.5rem;
             text-align: center;
         }
-        .success-icon {
-            font-size: 3rem;
-            margin-bottom: 1rem;
-        }
-        .poll-links {
+        .link-box {
             background: #f7fafc;
-            padding: 1.5rem;
             border-radius: 8px;
-            margin: 1.5rem 0;
-        }
-        .link-item {
-            margin-bottom: 1rem;
-        }
-        .link-item:last-child {
-            margin-bottom: 0;
-        }
-        .link-label {
-            font-weight: 600;
-            color: #2d3748;
-            display: block;
-            margin-bottom: 0.25rem;
-        }
-        .link-url {
+            padding: 1rem;
+            margin: 1.2rem 0;
             word-break: break-all;
-            background: #fff;
-            padding: 0.5rem;
-            border-radius: 4px;
-            border: 1px solid #e2e8f0;
-            font-family: monospace;
-            font-size: 0.9rem;
+            font-size: 1.1rem;
         }
-        .copy-btn {
-            background: #3182ce;
-            color: #fff;
-            border: none;
-            padding: 0.25rem 0.5rem;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 0.8rem;
-            margin-left: 0.5rem;
+        .label {
+            color: #4a5568;
+            font-weight: 600;
+            margin-bottom: 0.3rem;
+            display: block;
         }
-        .copy-btn:hover {
-            background: #2c5282;
-        }
+
+        
     </style>
 </head>
 <body>
-    <div class="success-container">
-        <div class="success-icon">🎉</div>
-        <h1>Poll Created Successfully!</h1>
-        <p>Your poll has been created. Share the voting link with others and use the stats link to view results.</p>
-        
-        <div class="poll-links">
-            <div class="link-item">
-                <span class="link-label">Voting Link:</span>
-                <div class="link-url">{{ poll_url }}</div>
-            </div>
-            <div class="link-item">
-                <span class="link-label">Stats Link:</span>
-                <div class="link-url">{{ stats_url }}</div>
-            </div>
-            <div class="link-item">
-                <span class="link-label">Expires:</span>
-                <div>{{ expiry.strftime('%Y-%m-%d at %H:%M UTC') }}</div>
+    <div class="created-container">
+        <h1>Poll Created!</h1>
+        <div>
+            <span class="label">Share this Poll Link:</span>
+            <div class="link-box">
+                <a href="{{ poll_url }}" style="color:#2563eb;word-break:break-all;text-decoration:underline;">{{ poll_url }}</a>
             </div>
         </div>
-        
+        <div>
+            <span class="label">Stats Link (keep this secret):</span>
+            <div class="link-box">
+                <a href="{{ stats_url }}" style="color:#2563eb;word-break:break-all;text-decoration:underline;">{{ stats_url }}</a>
+            </div>
+        </div>
+        <div style="margin-top:1.5rem;">
+            <span class="label">Poll expires:</span>
+            <div>{{ expiry.strftime('%Y-%m-%d %H:%M UTC') }}</div>
+        </div>
         <div style="margin-top:2rem;">
-            <a class="main-btn" href="{{ poll_url }}">View Poll</a>
-            <br><br>
-            <a href="{{ url_for('create_poll') }}">Create Another Poll</a>
-            <br>
-            <a href="{{ url_for('index') }}">Back to Home</a>
+            <a class="main-btn" href="{{ poll_url }}">Go to Poll</a>
+            <a style="margin-left:1rem;" href="{{ url_for('dashboard') }}">Dashboard</a>
         </div>
     </div>
 </body>
