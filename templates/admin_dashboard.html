@@ -34,17 +34,17 @@
             <tbody>
                 {% for poll in polls %}
                 <tr>
-                    <td>{{ poll.id }}</td>
+                    <td>{{ poll._id }}</td>
                     <td>{{ poll.question }}</td>
                     <td>
                         <ul class="option-list">
                         {% for option in poll.options %}
                             <li>
                                 {{ option.text }} ({{ option.votes }})
-                                <form method="post" action="{{ url_for('admin_add_vote', option_id=option.id) }}" style="display:inline;">
+                                <form method="post" action="{{ url_for('admin_add_vote', option_id=option._id|string) }}" style="display:inline;">
                                     <button class="admin-btn small" type="submit" title="Add Vote">+</button>
                                 </form>
-                                <form method="post" action="{{ url_for('admin_remove_vote', option_id=option.id) }}" style="display:inline;">
+                                <form method="post" action="{{ url_for('admin_remove_vote', option_id=option._id|string) }}" style="display:inline;">
                                     <button class="admin-btn small" type="submit" title="Remove Vote" {% if option.votes == 0 %}disabled{% endif %}>-</button>
                                 </form>
                             </li>
@@ -57,7 +57,7 @@
                         {% endif %}
                     </td>
                     <td class="admin-actions">
-                        <a class="admin-btn" href="{{ url_for('admin_edit_poll', poll_id=poll.id) }}">Edit</a>
+                        <a class="admin-btn" href="{{ url_for('admin_edit_poll', poll_id=poll._id|string) }}">Edit</a>
                         <form method="post" action="{{ url_for('admin_delete_poll', poll_id=poll.id) }}" style="display:inline;" onsubmit="return confirm('Delete this poll?');">
                             <button class="admin-btn danger" type="submit">Delete</button>
                         </form>

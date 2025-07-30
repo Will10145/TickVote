@@ -41,6 +41,9 @@
                     Admin
                 </button>
             {% endif %}
+            <button class="secondary-btn" onclick="window.location.href='/privacy-settings'">
+                Privacy Settings
+            </button>
             <button class="secondary-btn" onclick="window.location.href='/logout'">
                 Logout
             </button>
@@ -57,9 +60,18 @@
         <span>Want to see your polls?</span>
         <a href="/dashboard">Go to The Dashboard</a>
         <br>
-          <span>Want to learn more or get into contact?</span>
+        <span>Want to learn more or get into contact?</span>
         <a href="/about">About Us</a>
+        <br><br>
+        <div style="font-size: 0.9rem; color: #718096;">
+            <a href="{{ url_for('privacy_policy') }}">Privacy Policy</a> | 
+            <a href="#" onclick="showCookieConsent()">Cookie Settings</a>
+        </div>
     </div>
+    
+    <!-- Include Cookie Consent Banner -->
+    {% include 'cookie_consent.html' %}
+    
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>

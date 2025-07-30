@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Privacy Settings – TickVote</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css?family=Inter:400,600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .privacy-settings-container {
+            max-width: 700px;
+            margin: 2rem auto;
+            background: #fff;
+            border-radius: 1rem;
+            box-shadow: 0 2px 16px rgba(44,62,80,0.07);
+            padding: 2rem 2.5rem;
+        }
+        .setting-section {
+            margin-bottom: 2rem;
+            padding: 1.5rem;
+            border: 1px solid #e2e8f0;
+            border-radius: 0.5rem;
+        }
+        .setting-section h3 {
+            color: #2d3748;
+            margin-bottom: 1rem;
+            font-size: 1.2rem;
+        }
+        .setting-section p {
+            color: #4a5568;
+            margin-bottom: 1rem;
+            line-height: 1.5;
+        }
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider {
+            background-color: #3182ce;
+        }
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+        .data-request-section {
+            background: #f7fafc;
+            border-left: 4px solid #3182ce;
+        }
+        .danger-section {
+            background: #fed7d7;
+            border-left: 4px solid #e53e3e;
+        }
+        .danger-section h3 {
+            color: #c53030;
+        }
+        .setting-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        .setting-label {
+            flex: 1;
+            margin-right: 1rem;
+        }
+        .success-message {
+            background: #c6f6d5;
+            color: #2f855a;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+        .error-message {
+            background: #fed7d7;
+            color: #c53030;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="privacy-settings-container">
+        <h1>Privacy Settings</h1>
+        
+        {% if success %}
+            <div class="success-message">{{ success }}</div>
+        {% endif %}
+        
+        {% if error %}
+            <div class="error-message">{{ error }}</div>
+        {% endif %}
+
+        {% if not firebase_uid %}
+            <div class="setting-section">
+                <h3>Account Required</h3>
+                <p>You need to be logged in to manage your privacy settings.</p>
+                <a class="main-btn" href="{{ url_for('login') }}">Login</a>
+            </div>
+        {% else %}
+            
+            <div class="setting-section">
+                <h3>Cookie Preferences</h3>
+                <p>Manage your cookie consent preferences. Essential cookies are always required for the site to function.</p>
+                
+                <form method="post" action="{{ url_for('privacy_settings') }}">
+                    <input type="hidden" name="action" value="update_cookies">
+                    
+                    <div class="setting-row">
+                        <div class="setting-label">
+                            <strong>Essential Cookies</strong><br>
+                            <small>Required for basic site functionality</small>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" checked disabled>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    
+                    <div class="setting-row">
+                        <div class="setting-label">
+                            <strong>Functional Cookies</strong><br>
+                            <small>Remember your preferences and settings</small>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" name="functional_cookies" value="1" 
+                                   {% if user_preferences.functional_cookies %}checked{% endif %}>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    
+                    <div class="setting-row">
+                        <div class="setting-label">
+                            <strong>Analytics Cookies</strong><br>
+                            <small>Help us improve our service</small>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" name="analytics_cookies" value="1" 
+                                   {% if user_preferences.analytics_cookies %}checked{% endif %}>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    
+                    <button type="submit" class="main-btn" style="margin-top: 1rem;">Save Cookie Preferences</button>
+                </form>
+            </div>
+
+            <div class="setting-section data-request-section">
+                <h3>Your Data Rights</h3>
+                <p>Under GDPR, you have the right to access, correct, or delete your personal data.</p>
+                
+                <div style="margin-bottom: 1rem;">
+                    <form method="post" action="{{ url_for('privacy_settings') }}" style="display: inline-block; margin-right: 1rem;">
+                        <input type="hidden" name="action" value="download_data">
+                        <button type="submit" class="secondary-btn">Download My Data</button>
+                    </form>
+                    
+                        <button onclick="window.open('https://forms.willcodes.tech/tickvote-remove-data','_blank')" class="secondary-btn">Request Data Correction</button>
+
+                </div>
+                
+                <p><strong>Account Information:</strong></p>
+                <ul>
+                    <li>Email: {{ user_email or 'Not available' }}</li>
+                    <li>Display Name: {{ user_name or 'Not available' }}</li>
+                    <li>Account Created: {{ account_created or 'Not available' }}</li>
+                    <li>Polls Created: {{ polls_count or 0 }}</li>
+                </ul>
+            </div>
+
+            <div class="setting-section">
+                <h3>Data Retention</h3>
+                <p>Configure how long your data should be retained.</p>
+                
+                <form method="post" action="{{ url_for('privacy_settings') }}">
+                    <input type="hidden" name="action" value="update_retention">
+                    
+                    <div class="setting-row">
+                        <div class="setting-label">
+                            <strong>Auto-delete inactive polls</strong><br>
+                            <small>Automatically delete polls after they expire</small>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" name="auto_delete_polls" value="1" 
+                                   {% if user_preferences.auto_delete_polls %}checked{% endif %}>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    
+                    <button type="submit" class="main-btn" style="margin-top: 1rem;">Save Retention Settings</button>
+                </form>
+            </div>
+
+            <div class="setting-section danger-section">
+                <h3>Delete Account</h3>
+                <p><strong>Warning:</strong> This action cannot be undone. Deleting your account will permanently remove all your polls, votes, and personal data.</p>
+                
+                <form method="post" action="{{ url_for('privacy_settings') }}" 
+                      onsubmit="return confirm('Are you absolutely sure you want to delete your account? This action cannot be undone and will permanently delete all your data.');">
+                    <input type="hidden" name="action" value="delete_account">
+                    <button type="submit" class="main-btn" style="background: #e53e3e; border-color: #e53e3e;">
+                        Delete My Account
+                    </button>
+                </form>
+            </div>
+        {% endif %}
+
+        <div style="margin-top: 2rem; text-align: center;">
+            <a href="{{ url_for('privacy_policy') }}">View Privacy Policy</a> | 
+            <a href="{{ url_for('dashboard') }}">Back to Dashboard</a>
+        </div>
+    </div>
+</body>
+</html>

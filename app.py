@@ -1,21 +1,34 @@
-from flask import Flask, render_template, redirect, url_for, request, make_response, jsonify, session
-from models import db, Poll, Option
+from flask import Flask, render_template, redirect, url_for, request, make_response, jsonify, session, send_file
+from models import db, User, UserPrivacyPreferences, DataProcessingLog, DataExportRequest
 from datetime import datetime, timezone, timedelta
 import secrets
 import requests
 import os
+import json
+import zipfile
+import tempfile
 import firebase_admin
 from firebase_admin import credentials, auth as firebase_auth
 from dotenv import load_dotenv
 from flask_migrate import Migrate
 from functools import wraps
+from pymongo import MongoClient
+from bson.objectid import ObjectId
 
 # Load environment variables
 load_dotenv()
 
+
 # Initialize Flask app
 app = Flask(__name__)
 migrate = Migrate(app, db)
+
+# MongoDB setup
+MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017/tickvote')
+mongo_client = MongoClient(MONGO_URI)
+mongo_db = mongo_client.get_default_database()
+polls_collection = mongo_db['polls']
+options_collection = mongo_db['options']
 
 # Configuration constants
 class Config:
@@ -176,7 +189,7 @@ def firebase_login():
             return jsonify({'success': False, 'error': 'No ID token provided'}), 400
         
         print(f"Attempting to verify Firebase ID token...")
-        decoded_token = firebase_auth.verify_id_token(id_token)
+        decoded_token = firebase_auth. verify_id_token(id_token)
         print(f"Firebase token verified successfully for UID: {decoded_token['uid']}")
         
         # Get the user record to check email verification
@@ -284,74 +297,55 @@ def claim_anonymous_polls(firebase_uid):
 @app.route('/create', methods=['GET', 'POST'])
 def create_poll():
     firebase_uid = get_firebase_uid()
-    
     if request.method == 'POST':
-        # Skip reCAPTCHA verification for now to make it easier to test
-        # recaptcha_response = request.form.get('g-recaptcha-response')
-        # if not recaptcha_response or not verify_recaptcha(recaptcha_response):
-        #     return render_template('create_poll.html', error="reCAPTCHA verification failed. Please try again.")
-        
         question = request.form.get('question', '').strip()
         options = [opt.strip() for opt in request.form.getlist('options') if opt.strip()]
         expiry_hours = request.form.get('expiry')
-        
         # Validation
         if not question:
             return render_template('create_poll.html', error="Please provide a question.")
-        
         if not options or len(options) < 1:
             return render_template('create_poll.html', error="Please provide at least one option.")
-        
         try:
             expiry_hours = int(expiry_hours)
             if expiry_hours < 1 or expiry_hours > 168:
                 raise ValueError()
         except (ValueError, TypeError):
             return render_template('create_poll.html', error="Expiry must be between 1 and 168 hours.")
-        
         try:
-            # Create poll
             poll_token = generate_token()
             stats_token = generate_token()
             owner_token = generate_token()
             expiry_time = datetime.now(timezone.utc) + timedelta(hours=expiry_hours)
-            
-            poll = Poll(
-                question=question,
-                token=poll_token,
-                stats_token=stats_token,
-                owner_token=owner_token,
-                expires_at=expiry_time,
-                firebase_uid=firebase_uid  # Will be None if not authenticated
-            )
-            
-            db.session.add(poll)
-            db.session.flush()
-            
-            # Add options
+            poll_doc = {
+                'question': question,
+                'token': poll_token,
+                'stats_token': stats_token,
+                'owner_token': owner_token,
+                'expires_at': expiry_time,
+                'firebase_uid': firebase_uid,
+                'paused': False,
+                'locked': False,
+            }
+            poll_result = polls_collection.insert_one(poll_doc)
+            poll_id = poll_result.inserted_id
             for opt_text in options:
-                option = Option(poll_id=poll.id, text=opt_text)
-                db.session.add(option)
-            
-            db.session.commit()
-            
-            # Generate URLs and response
+                options_collection.insert_one({
+                    'poll_id': poll_id,
+                    'text': opt_text,
+                    'votes': 0
+                })
             poll_url = url_for('view_poll_token', token=poll_token, _external=True)
             stats_url = url_for('poll_stats', stats_token=stats_token, _external=True)
             resp = make_response(render_template('poll_created.html', 
                                                poll_url=poll_url, 
                                                stats_url=stats_url, 
                                                expiry=expiry_time))
-            
-            # Always set the owner token cookie, regardless of authentication status
             resp = add_owner_token_cookie(resp, owner_token)
             return resp
-            
         except Exception as e:
-            db.session.rollback()
             print(f"Error creating poll: {e}")
             return render_template('create_poll.html', error="An error occurred while creating the poll. Please try again.")
-    
     return render_template('create_poll.html')
 
 @app.route('/dashboard')
@@ -360,35 +354,30 @@ def dashboard():
     try:
         firebase_uid = get_firebase_uid()
         tokens = get_owner_tokens()
-        
-        # Collect polls from all sources
         polls = []
-        
         # Get Firebase user polls
         if firebase_uid:
-            firebase_polls = Poll.query.filter_by(firebase_uid=firebase_uid).all()
+            firebase_polls = list(polls_collection.find({'firebase_uid': firebase_uid}))
             polls.extend(firebase_polls)
-        
         # Get anonymous user polls via cookies
         if tokens:
-            token_polls = Poll.query.filter(Poll.owner_token.in_(tokens)).all()
+            token_polls = list(polls_collection.find({'owner_token': {'$in': list(tokens)}}))
             polls.extend(token_polls)
-        
-        # Remove duplicates while preserving order
+        # Remove duplicates by _id
         seen_ids = set()
         unique_polls = []
         for poll in polls:
-            if poll.id not in seen_ids:
+            poll_id = str(poll['_id'])
+            if poll_id not in seen_ids:
                 unique_polls.append(poll)
-                seen_ids.add(poll.id)
-        
-        # Show login prompt if user has no polls and is not authenticated
+                seen_ids.add(poll_id)
         show_login_prompt = not unique_polls and not firebase_uid and not tokens
-        
+        # Attach options to each poll for template compatibility
+        for poll in unique_polls:
+            poll['options'] = list(options_collection.find({'poll_id': poll['_id']}))
         return render_template('dashboard.html', 
                              polls=unique_polls, 
                              show_login_prompt=show_login_prompt)
-    
     except Exception as e:
         print(f"Error in dashboard: {e}")
         return render_template('dashboard.html', 
@@ -423,64 +412,67 @@ def account_disabled():
 
 @app.route('/poll/<int:poll_id>', methods=['GET', 'POST'])
 def view_poll(poll_id):
-    poll = Poll.query.get_or_404(poll_id)
-    # Handle both timezone-aware and naive datetimes
-    if poll.expires_at:
-        if poll.expires_at.tzinfo is None:
-            # Database datetime is naive, assume it's UTC
-            poll_expires_utc = poll.expires_at.replace(tzinfo=timezone.utc)
-        else:
-            poll_expires_utc = poll.expires_at
-        expired = poll_expires_utc < datetime.now(timezone.utc)
-    else:
-        expired = False
-    paused = poll.paused
-    locked = poll.locked
+    poll = polls_collection.find_one({'_id': ObjectId(poll_id)})
+    if not poll:
+        return render_template('404.html'), 404
+    expires_at = poll.get('expires_at')
+    # Ensure expires_at is timezone-aware (UTC)
+    if expires_at and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    expired = expires_at and expires_at < datetime.now(timezone.utc)
+    paused = poll.get('paused', False)
+    locked = poll.get('locked', False)
     voted_tokens = get_voted_tokens()
-    already_voted = poll.token in voted_tokens
+    already_voted = poll['token'] in voted_tokens
     can_vote = not (expired or paused or locked or already_voted)
+    options = list(options_collection.find({'poll_id': poll['_id']}))
     if request.method == 'POST' and can_vote:
         option_id = request.form.get('option')
-        option = Option.query.filter_by(id=option_id, poll_id=poll_id).first()
+        option = options_collection.find_one({'_id': ObjectId(option_id), 'poll_id': poll['_id']})
         if option:
-            option.votes += 1
-            db.session.commit()
+            options_collection.update_one({'_id': ObjectId(option_id)}, {'$inc': {'votes': 1}})
         resp = make_response(redirect(url_for('view_poll', poll_id=poll_id)))
-        return add_voted_token_cookie(resp, poll.token)
-    return render_template('poll.html', poll=poll, expired=expired, paused=paused, locked=locked, already_voted=already_voted)
+        return add_voted_token_cookie(resp, poll['token'])
+    return render_template('poll.html', poll=poll, options=options, expired=expired, paused=paused, locked=locked, already_voted=already_voted)
 
 @app.route('/poll/token/<token>', methods=['GET', 'POST'])
 def view_poll_token(token):
-    poll = Poll.query.filter_by(token=token).first_or_404()
-    # Handle both timezone-aware and naive datetimes
-    if poll.expires_at:
-        if poll.expires_at.tzinfo is None:
-            # Database datetime is naive, assume it's UTC
-            poll_expires_utc = poll.expires_at.replace(tzinfo=timezone.utc)
-        else:
-            poll_expires_utc = poll.expires_at
-        expired = poll_expires_utc < datetime.now(timezone.utc)
-    else:
-        expired = False
-    paused = poll.paused
-    locked = poll.locked
+    poll = polls_collection.find_one({'token': token})
+    if not poll:
+        return render_template('404.html'), 404
+    expires_at = poll.get('expires_at')
+    # Ensure expires_at is timezone-aware (UTC)
+    if expires_at and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    expired = expires_at and expires_at < datetime.now(timezone.utc)
+    paused = poll.get('paused', False)
+    locked = poll.get('locked', False)
     voted_tokens = get_voted_tokens()
-    already_voted = poll.token in voted_tokens
+    already_voted = poll['token'] in voted_tokens
     just_voted = False
     can_vote = not (expired or paused or locked or already_voted)
+    options = list(options_collection.find({'poll_id': poll['_id']}))
+    # For template compatibility, set poll.options and ensure _id is string for form value
+    for opt in options:
+        if '_id' in opt:
+            opt['id'] = str(opt['_id'])
+    poll['options'] = options
     if request.method == 'POST':
         if can_vote:
             option_id = request.form.get('option')
-            option = Option.query.filter_by(id=option_id, poll_id=poll.id).first()
+            if not option_id:
+                return render_template('poll.html', poll=poll, expired=expired, paused=paused, locked=locked, already_voted=already_voted, error="No option selected.")
+            try:
+                option_obj_id = ObjectId(option_id)
+            except Exception:
+                return render_template('poll.html', poll=poll, expired=expired, paused=paused, locked=locked, already_voted=already_voted, error="Invalid option selected.")
+            option = options_collection.find_one({'_id': option_obj_id, 'poll_id': poll['_id']})
             if option:
-                option.votes += 1
-                db.session.commit()
+                options_collection.update_one({'_id': option_obj_id}, {'$inc': {'votes': 1}})
             resp = make_response(redirect(url_for('view_poll_token', token=token, voted='1')))
-            return add_voted_token_cookie(resp, poll.token)
+            return add_voted_token_cookie(resp, poll['token'])
         else:
-            # User tried to vote again
             return render_template('poll.html', poll=poll, expired=expired, paused=paused, locked=locked, already_voted=already_voted, tried_to_vote_again=True)
-    # Check if redirected after voting
     just_voted = request.args.get('voted') == '1'
     return render_template('poll.html', poll=poll, expired=expired, paused=paused, locked=locked, already_voted=already_voted, just_voted=just_voted)
 
@@ -536,83 +528,116 @@ def admin_required(f):
 @app.route('/admin')
 @admin_required
 def admin_dashboard():
-    polls = Poll.query.all()
+    polls = list(polls_collection.find())
+    for poll in polls:
+        poll['options'] = list(options_collection.find({'poll_id': poll['_id']}))
     return render_template('admin_dashboard.html', polls=polls)
 
-@app.route('/admin/poll/<int:poll_id>/edit', methods=['GET', 'POST'])
+
+# Accept poll_id as string for MongoDB ObjectId
+@app.route('/admin/poll/<poll_id>/edit', methods=['GET', 'POST'])
 @admin_required
 def admin_edit_poll(poll_id):
-    poll = Poll.query.get_or_404(poll_id)
+    try:
+        obj_id = ObjectId(poll_id)
+    except Exception:
+        return redirect(url_for('admin_dashboard'))
+    poll = polls_collection.find_one({'_id': obj_id})
+    if not poll:
+        return redirect(url_for('admin_dashboard'))
+    poll['options'] = list(options_collection.find({'poll_id': obj_id}))
     if request.method == 'POST':
         question = request.form.get('question')
         if question:
-            poll.question = question
-        for option in poll.options:
-            new_text = request.form.get(f'option_text_{option.id}')
+            polls_collection.update_one({'_id': obj_id}, {'$set': {'question': question}})
+        for option in poll['options']:
+            new_text = request.form.get(f'option_text_{option["_id"]}')
             if new_text:
-                option.text = new_text
-        db.session.commit()
+                options_collection.update_one({'_id': option['_id']}, {'$set': {'text': new_text}})
         return redirect(url_for('admin_dashboard'))
     return render_template('admin_edit_poll.html', poll=poll)
 
-@app.route('/admin/poll/<int:poll_id>/delete', methods=['POST'])
+
+# Accept poll_id as string for MongoDB ObjectId
+@app.route('/admin/poll/<poll_id>/delete', methods=['POST'])
 @admin_required
 def admin_delete_poll(poll_id):
-    poll = Poll.query.get_or_404(poll_id)
-    Option.query.filter_by(poll_id=poll.id).delete()
-    db.session.delete(poll)
-    db.session.commit()
+    try:
+        obj_id = ObjectId(poll_id)
+    except Exception:
+        return redirect(url_for('admin_dashboard'))
+    options_collection.delete_many({'poll_id': obj_id})
+    polls_collection.delete_one({'_id': obj_id})
     return redirect(url_for('admin_dashboard'))
 
-@app.route('/admin/poll/<int:poll_id>/lock', methods=['POST'])
+
+# Accept poll_id as string for MongoDB ObjectId
+@app.route('/admin/poll/<poll_id>/lock', methods=['POST'])
 @admin_required
 def admin_lock_poll(poll_id):
-    poll = Poll.query.get_or_404(poll_id)
-    poll.locked = True
-    db.session.commit()
+    try:
+        obj_id = ObjectId(poll_id)
+    except Exception:
+        return redirect(url_for('admin_dashboard'))
+    polls_collection.update_one({'_id': obj_id}, {'$set': {'locked': True}})
     return redirect(url_for('admin_dashboard'))
 
-@app.route('/admin/poll/<int:poll_id>/unlock', methods=['POST'])
+
+# Accept poll_id as string for MongoDB ObjectId
+@app.route('/admin/poll/<poll_id>/unlock', methods=['POST'])
 @admin_required
 def admin_unlock_poll(poll_id):
-    poll = Poll.query.get_or_404(poll_id)
-    poll.locked = False
-    db.session.commit()
+    try:
+        obj_id = ObjectId(poll_id)
+    except Exception:
+        return redirect(url_for('admin_dashboard'))
+    polls_collection.update_one({'_id': obj_id}, {'$set': {'locked': False}})
     return redirect(url_for('admin_dashboard'))
 
-@app.route('/admin/option/<int:option_id>/add_vote', methods=['POST'])
+
+# Accept option_id as string for MongoDB ObjectId
+@app.route('/admin/option/<option_id>/add_vote', methods=['POST'])
 @admin_required
 def admin_add_vote(option_id):
-    option = Option.query.get_or_404(option_id)
-    option.votes += 1
-    db.session.commit()
+    try:
+        obj_id = ObjectId(option_id)
+    except Exception:
+        return redirect(request.referrer or url_for('admin_dashboard'))
+    option = options_collection.find_one({'_id': obj_id})
+    if option:
+        options_collection.update_one({'_id': obj_id}, {'$inc': {'votes': 1}})
     return redirect(request.referrer or url_for('admin_dashboard'))
 
-@app.route('/admin/option/<int:option_id>/remove_vote', methods=['POST'])
+
+# Accept option_id as string for MongoDB ObjectId
+@app.route('/admin/option/<option_id>/remove_vote', methods=['POST'])
 @admin_required
 def admin_remove_vote(option_id):
-    option = Option.query.get_or_404(option_id)
-    if option.votes > 0:
-        option.votes -= 1
-        db.session.commit()
+    try:
+        obj_id = ObjectId(option_id)
+    except Exception:
+        return redirect(request.referrer or url_for('admin_dashboard'))
+    option = options_collection.find_one({'_id': obj_id})
+    if option and option.get('votes', 0) > 0:
+        options_collection.update_one({'_id': obj_id}, {'$inc': {'votes': -1}})
     return redirect(request.referrer or url_for('admin_dashboard'))
 
 @app.route('/stats/<stats_token>', methods=['GET', 'POST'])
 def poll_stats(stats_token):
-    poll = Poll.query.filter_by(stats_token=stats_token).first_or_404()
+    poll = polls_collection.find_one({'stats_token': stats_token})
+    if not poll:
+        return render_template('404.html'), 404
     if request.method == 'POST':
         action = request.form.get('action')
         if action == 'delete':
-            Option.query.filter_by(poll_id=poll.id).delete()
-            db.session.delete(poll)
-            db.session.commit()
+            options_collection.delete_many({'poll_id': poll['_id']})
+            polls_collection.delete_one({'_id': poll['_id']})
             return render_template('poll_deleted.html')
         elif action == 'pause':
-            poll.paused = True
-            db.session.commit()
+            polls_collection.update_one({'_id': poll['_id']}, {'$set': {'paused': True}})
         elif action == 'unpause':
-            poll.paused = False
-            db.session.commit()
+            polls_collection.update_one({'_id': poll['_id']}, {'$set': {'paused': False}})
+    poll['options'] = list(options_collection.find({'poll_id': poll['_id']}))
     return render_template('poll_stats.html', poll=poll)
 
 @app.context_processor
@@ -655,6 +680,432 @@ def verify_recaptcha_endpoint():
     except Exception as e:
         print(f"reCAPTCHA verification error: {e}")
         return jsonify({'success': False, 'error': 'Server error during verification'}), 500
+
+@app.route('/gdpr/request-data', methods=['GET', 'POST'])
+def request_data():
+    """Request personal data export under GDPR"""
+    if request.method == 'POST':
+        firebase_uid = get_firebase_uid()
+        if not firebase_uid:
+            return jsonify({'success': False, 'error': 'User not authenticated'}), 401
+        
+        # Log the data request
+        log_entry = DataProcessingLog(
+            firebase_uid=firebase_uid,
+            action='data_export_requested',
+            timestamp=datetime.now(timezone.utc)
+        )
+        db.session.add(log_entry)
+        db.session.commit()
+        
+        # Create a ZIP file of the user's data
+        try:
+            with tempfile.TemporaryDirectory() as tmpdirname:
+                zip_path = os.path.join(tmpdirname, 'user_data.zip')
+                with zipfile.ZipFile(zip_path, 'w') as zipf:
+                    # Add user info
+                    user = User.query.filter_by(firebase_uid=firebase_uid).first()
+                    if user:
+                        user_info = {
+                            'firebase_uid': user.firebase_uid,
+                            'email': user.email,
+                            'display_name': user.display_name,
+                            'photo_url': user.photo_url
+                        }
+                        zipf.writestr('user_info.json', json.dumps(user_info))
+                    
+                    # Add privacy preferences
+                    preferences = UserPrivacyPreferences.query.filter_by(firebase_uid=firebase_uid).all()
+                    prefs_dict = {pref.category: pref.value for pref in preferences}
+                    zipf.writestr('privacy_preferences.json', json.dumps(prefs_dict))
+                    
+                    # Add polls and options
+                    polls = Poll.query.filter_by(firebase_uid=firebase_uid).all()
+                    for poll in polls:
+                        poll_data = {
+                            'id': poll.id,
+                            'question': poll.question,
+                            'token': poll.token,
+                            'expires_at': poll.expires_at.isoformat() if poll.expires_at else None,
+                            'options': [{'id': opt.id, 'text': opt.text, 'votes': opt.votes} for opt in poll.options]
+                        }
+                        zipf.writestr(f'polls/poll_{poll.id}.json', json.dumps(poll_data))
+                
+                # Send the ZIP file to the user
+                return send_file(zip_path, as_attachment=True, download_name='user_data.zip')
+        
+        except Exception as e:
+            print(f"Error creating data export: {e}")
+            return jsonify({'success': False, 'error': 'Error creating data export'}), 500
+    
+    return render_template('request_data.html')
+
+@app.route('/gdpr/erase-data', methods=['POST'])
+def erase_data():
+    """Handle GDPR data erasure requests"""
+    firebase_uid = get_firebase_uid()
+    if not firebase_uid:
+        return jsonify({'success': False, 'error': 'User not authenticated'}), 401
+    
+    # Log the data erasure request
+    log_entry = DataProcessingLog(
+        firebase_uid=firebase_uid,
+        action='data_eraser_requested',
+        timestamp=datetime.now(timezone.utc)
+    )
+    db.session.add(log_entry)
+    db.session.commit()
+    
+    # Erase user data
+    try:
+        # Delete user from Firebase Auth
+        firebase_auth.delete_user(firebase_uid)
+        
+        # Delete user data from database
+        User.query.filter_by(firebase_uid=firebase_uid).delete()
+        UserPrivacyPreferences.query.filter_by(firebase_uid=firebase_uid).delete()
+        Poll.query.filter_by(firebase_uid=firebase_uid).delete()
+        db.session.commit()
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error erasing data: {e}")
+        return jsonify({'success': False, 'error': 'Error erasing data'}), 500
+
+# GDPR Helper Functions
+def log_data_processing(firebase_uid, action, legal_basis, data_categories, purpose):
+    """Log data processing activities for GDPR compliance"""
+    try:
+        log_entry = DataProcessingLog(
+            firebase_uid=firebase_uid,
+            action=action,
+            legal_basis=legal_basis,
+            data_categories=json.dumps(data_categories),
+            purpose=purpose,
+            ip_address=request.environ.get('HTTP_X_FORWARDED_FOR', request.environ.get('REMOTE_ADDR')),
+            user_agent=request.environ.get('HTTP_USER_AGENT', '')
+        )
+        db.session.add(log_entry)
+        db.session.commit()
+    except Exception as e:
+        print(f"Error logging data processing: {e}")
+
+def get_user_privacy_preferences(firebase_uid):
+    """Get user's privacy preferences, create default if not exists"""
+    if not firebase_uid:
+        return None
+    
+    prefs = UserPrivacyPreferences.query.filter_by(firebase_uid=firebase_uid).first()
+    if not prefs:
+        # Create default preferences
+        prefs = UserPrivacyPreferences(firebase_uid=firebase_uid)
+        db.session.add(prefs)
+        db.session.commit()
+    return prefs
+
+def export_user_data(firebase_uid):
+    """Export all user data for GDPR data portability"""
+    try:
+        # Get user info from Firebase
+        user_record = firebase_auth.get_user(firebase_uid)
+        
+        # Get polls created by user
+        polls = Poll.query.filter_by(firebase_uid=firebase_uid).all()
+        
+        # Get privacy preferences
+        preferences = get_user_privacy_preferences(firebase_uid)
+        
+        # Get data processing logs
+        logs = DataProcessingLog.query.filter_by(firebase_uid=firebase_uid).all()
+        
+        export_data = {
+            'user_info': {
+                'firebase_uid': firebase_uid,
+                'email': user_record.email if hasattr(user_record, 'email') else None,
+                'display_name': user_record.display_name if hasattr(user_record, 'display_name') else None,
+                'email_verified': user_record.email_verified if hasattr(user_record, 'email_verified') else False,
+                'creation_time': user_record.user_metadata.creation_timestamp if hasattr(user_record, 'user_metadata') else None,
+                'last_signin_time': user_record.user_metadata.last_sign_in_timestamp if hasattr(user_record, 'user_metadata') else None,
+            },
+            'polls': [
+                {
+                    'id': poll.id,
+                    'question': poll.question,
+                    'token': poll.token,
+                    'stats_token': poll.stats_token,
+                    'expires_at': poll.expires_at.isoformat() if poll.expires_at else None,
+                    'paused': poll.paused,
+                    'locked': poll.locked,
+                    'options': [
+                        {
+                            'text': option.text,
+                            'votes': option.votes
+                        } for option in poll.options
+                    ]
+                } for poll in polls
+            ],
+            'privacy_preferences': {
+                'functional_cookies': preferences.functional_cookies if preferences else True,
+                'analytics_cookies': preferences.analytics_cookies if preferences else False,
+                'auto_delete_polls': preferences.auto_delete_polls if preferences else False,
+                'email_notifications': preferences.email_notifications if preferences else True,
+                'data_retention_days': preferences.data_retention_days if preferences else 365,
+                'consent_given_at': preferences.consent_given_at.isoformat() if preferences and preferences.consent_given_at else None,
+                'consent_updated_at': preferences.consent_updated_at.isoformat() if preferences and preferences.consent_updated_at else None,
+            },
+            'data_processing_logs': [
+                {
+                    'action': log.action,
+                    'legal_basis': log.legal_basis,
+                    'data_categories': json.loads(log.data_categories) if log.data_categories else [],
+                    'purpose': log.purpose,
+                    'timestamp': log.timestamp.isoformat(),
+                    'ip_address': log.ip_address
+                } for log in logs
+            ],
+            'export_info': {
+                'generated_at': datetime.utcnow().isoformat(),
+                'format_version': '1.0'
+            }
+        }
+        
+        return export_data
+    except Exception as e:
+        print(f"Error exporting user data: {e}")
+        return None
+
+def delete_user_data(firebase_uid):
+    """Delete all user data for GDPR right to erasure"""
+    try:
+        # Delete polls created by user
+        polls = Poll.query.filter_by(firebase_uid=firebase_uid).all()
+        for poll in polls:
+            # Delete options first (foreign key constraint)
+            for option in poll.options:
+                db.session.delete(option)
+            db.session.delete(poll)
+        
+        # Delete privacy preferences
+        prefs = UserPrivacyPreferences.query.filter_by(firebase_uid=firebase_uid).first()
+        if prefs:
+            db.session.delete(prefs)
+        
+        # Delete data processing logs (keep anonymized for compliance)
+        logs = DataProcessingLog.query.filter_by(firebase_uid=firebase_uid).all()
+        for log in logs:
+            log.firebase_uid = None  # Anonymize instead of delete
+        
+        # Delete data export requests
+        requests = DataExportRequest.query.filter_by(firebase_uid=firebase_uid).all()
+        for req in requests:
+            db.session.delete(req)
+        
+        db.session.commit()
+        
+        # Also delete from Firebase (optional - user can do this themselves)
+        # firebase_auth.delete_user(firebase_uid)
+        
+        return True
+    except Exception as e:
+        print(f"Error deleting user data: {e}")
+        db.session.rollback()
+        return False
+
+# GDPR Routes
+@app.route('/privacy-policy')
+def privacy_policy():
+    """Privacy policy page"""
+    return render_template('privacy_policy.html', current_date=datetime.now())
+
+@app.route('/privacy-settings', methods=['GET', 'POST'])
+@require_email_verification
+def privacy_settings():
+    """Privacy settings and GDPR rights management"""
+    firebase_uid = get_firebase_uid()
+    if not firebase_uid:
+        return redirect(url_for('login'))
+    
+    success = None
+    error = None
+    
+    if request.method == 'POST':
+        action = request.form.get('action')
+        
+        if action == 'update_cookies':
+            prefs = get_user_privacy_preferences(firebase_uid)
+            prefs.functional_cookies = 'functional_cookies' in request.form
+            prefs.analytics_cookies = 'analytics_cookies' in request.form
+            prefs.consent_updated_at = datetime.utcnow()
+            db.session.commit()
+            
+            log_data_processing(
+                firebase_uid, 
+                'update_cookie_preferences', 
+                'consent', 
+                ['cookie_preferences'], 
+                'User updated cookie consent preferences'
+            )
+            success = "Cookie preferences updated successfully"
+            
+        elif action == 'update_retention':
+            prefs = get_user_privacy_preferences(firebase_uid)
+            prefs.auto_delete_polls = 'auto_delete_polls' in request.form
+            prefs.consent_updated_at = datetime.utcnow()
+            db.session.commit()
+            success = "Data retention settings updated successfully"
+            
+        elif action == 'download_data':
+            # Create data export request
+            export_request = DataExportRequest(
+                firebase_uid=firebase_uid,
+                request_type='export',
+                status='processing'
+            )
+            db.session.add(export_request)
+            db.session.commit()
+            
+            # Export data
+            export_data = export_user_data(firebase_uid)
+            if export_data:
+                # Create temporary file
+                with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                    json.dump(export_data, f, indent=2, default=str)
+                    temp_file = f.name
+                
+                export_request.status = 'completed'
+                export_request.completed_at = datetime.utcnow()
+                export_request.export_file_path = temp_file
+                db.session.commit()
+                
+                log_data_processing(
+                    firebase_uid, 
+                    'data_export', 
+                    'consent', 
+                    ['all_user_data'], 
+                    'User requested data export under GDPR Article 20'
+                )
+                
+                return send_file(temp_file, as_attachment=True, download_name=f'tickvote_data_export_{firebase_uid[:8]}.json')
+            else:
+                export_request.status = 'failed'
+                db.session.commit()
+                error = "Failed to export data. Please try again."
+                
+        elif action == 'delete_account':
+            if delete_user_data(firebase_uid):
+                log_data_processing(
+                    firebase_uid, 
+                    'account_deletion', 
+                    'consent', 
+                    ['all_user_data'], 
+                    'User requested account deletion under GDPR Article 17'
+                )
+                session.clear()
+                return redirect(url_for('index'))
+            else:
+                error = "Failed to delete account. Please contact support."
+                
+        elif action == 'request_correction':
+            # Create data correction request
+            correction_request = DataExportRequest(
+                firebase_uid=firebase_uid,
+                request_type='correction',
+                status='pending',
+                notes='User requested data correction'
+            )
+            db.session.add(correction_request)
+            db.session.commit()
+            success = "Data correction request submitted. We will contact you within 30 days."
+    
+    # Get user info for display
+    try:
+        user_record = firebase_auth.get_user(firebase_uid)
+        user_email = user_record.email if hasattr(user_record, 'email') else None
+        user_name = get_user_display_name(firebase_uid)
+        account_created = user_record.user_metadata.creation_timestamp if hasattr(user_record, 'user_metadata') else None
+    except:
+        user_email = None
+        user_name = None
+        account_created = None
+    
+    # Count polls for privacy settings using MongoDB
+    polls_count = polls_collection.count_documents({'firebase_uid': firebase_uid})
+    user_preferences = get_user_privacy_preferences(firebase_uid)
+    
+    return render_template('privacy_settings.html', 
+                         firebase_uid=firebase_uid,
+                         user_preferences=user_preferences,
+                         user_email=user_email,
+                         user_name=user_name,
+                         account_created=account_created,
+                         polls_count=polls_count,
+                         success=success,
+                         error=error)
+
+@app.route('/api/cookie-consent', methods=['POST'])
+def api_cookie_consent():
+    """API endpoint to save cookie consent preferences"""
+    try:
+        data = request.get_json()
+        firebase_uid = get_firebase_uid()
+        
+        if firebase_uid:
+            prefs = get_user_privacy_preferences(firebase_uid)
+            prefs.functional_cookies = data.get('functional', True)
+            prefs.analytics_cookies = data.get('analytics', False)
+            prefs.consent_updated_at = datetime.utcnow()
+            db.session.commit()
+            
+            log_data_processing(
+                firebase_uid, 
+                'cookie_consent', 
+                'consent', 
+                ['cookie_preferences'], 
+                'User provided cookie consent'
+            )
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        print(f"Error saving cookie consent: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/log-interaction', methods=['POST'])
+def api_log_interaction():
+    """API endpoint to log user interactions for analytics (GDPR compliant)"""
+    try:
+        data = request.get_json()
+        firebase_uid = get_firebase_uid()
+        
+        # Only log if user has consented to analytics cookies
+        if firebase_uid:
+            prefs = get_user_privacy_preferences(firebase_uid)
+            if prefs and prefs.analytics_cookies:
+                log_data_processing(
+                    firebase_uid,
+                    f"analytics_{data.get('action', 'unknown')}",
+                    'consent',
+                    ['usage_data', 'technical_data'],
+                    'Analytics and service improvement'
+                )
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        print(f"Error logging interaction: {e}")
+        return jsonify({'success': False}), 500
+
+@app.context_processor
+def inject_gdpr_context():
+    """Inject GDPR-related context into all templates"""
+    firebase_uid = get_firebase_uid()
+    user_preferences = get_user_privacy_preferences(firebase_uid) if firebase_uid else None
+    
+    return {
+        'user_preferences': user_preferences,
+        'show_cookie_consent': not request.cookies.get('cookieConsent'),
+        'privacy_policy_url': url_for('privacy_policy'),
+        'privacy_settings_url': url_for('privacy_settings')
+    }
 
 if __name__ == '__main__':
     with app.app_context():

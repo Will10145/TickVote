@@ -93,7 +93,7 @@
                 {% for option in poll.options %}
                     <div class="poll-option">
                         <label>
-                            <input type="radio" name="option" value="{{ option.id }}" required>
+                            <input type="radio" name="option" value="{{ option.id if option.id is defined else option._id|string }}" required>
                             {{ option.text }}
                         </label>
                     </div>
@@ -114,5 +114,8 @@
             <a href="{{ url_for('index') }}">Back to Home</a>
         </div>
     </div>
+    
+    <!-- Include Cookie Consent Banner -->
+    {% include 'cookie_consent.html' %}
 </body>
 </html>

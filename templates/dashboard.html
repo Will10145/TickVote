@@ -91,8 +91,14 @@
             {% if show_login_prompt %}
                 <br><br>
                 <a href="{{ url_for('login') }}">Login</a> to sync polls across devices
+            {% else %}
+                <br><br>
+                <a href="{{ url_for('privacy_settings') }}">Privacy Settings</a>
             {% endif %}
         </div>
     </div>
+    
+    <!-- Include Cookie Consent Banner -->
+    {% include 'cookie_consent.html' %}
 </body>
 </html>
