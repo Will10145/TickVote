@@ -23,12 +23,14 @@ load_dotenv()
 app = Flask(__name__)
 migrate = Migrate(app, db)
 
+
 # MongoDB setup
 MONGO_URI = os.getenv('MONGO_URI', 'mongodb://localhost:27017/tickvote')
 mongo_client = MongoClient(MONGO_URI)
 mongo_db = mongo_client.get_default_database()
 polls_collection = mongo_db['polls']
 options_collection = mongo_db['options']
+privacy_collection = mongo_db['privacy_preferences']
 
 # Configuration constants
 class Config:
@@ -791,18 +793,29 @@ def log_data_processing(firebase_uid, action, legal_basis, data_categories, purp
     except Exception as e:
         print(f"Error logging data processing: {e}")
 
+
+# MongoDB version of get_user_privacy_preferences
 def get_user_privacy_preferences(firebase_uid):
-    """Get user's privacy preferences, create default if not exists"""
+    """Get user's privacy preferences from MongoDB, create default if not exists"""
     if not firebase_uid:
         return None
-    
-    prefs = UserPrivacyPreferences.query.filter_by(firebase_uid=firebase_uid).first()
+    prefs = privacy_collection.find_one({'firebase_uid': firebase_uid})
     if not prefs:
         # Create default preferences
-        prefs = UserPrivacyPreferences(firebase_uid=firebase_uid)
-        db.session.add(prefs)
-        db.session.commit()
-    return prefs
+        prefs = {
+            'firebase_uid': firebase_uid,
+            'functional_cookies': True,
+            'analytics_cookies': False,
+            'auto_delete_polls': False,
+            'email_notifications': True,
+            'data_retention_days': 365,
+            'consent_given_at': datetime.utcnow(),
+            'consent_updated_at': datetime.utcnow(),
+            'created_at': datetime.utcnow(),
+            'updated_at': datetime.utcnow(),
+        }
+        privacy_collection.insert_one(prefs)
+    return privacy_collection.find_one({'firebase_uid': firebase_uid})
 
 def export_user_data(firebase_uid):
     """Export all user data for GDPR data portability"""
@@ -931,14 +944,17 @@ def privacy_settings():
     
     if request.method == 'POST':
         action = request.form.get('action')
-        
         if action == 'update_cookies':
             prefs = get_user_privacy_preferences(firebase_uid)
-            prefs.functional_cookies = 'functional_cookies' in request.form
-            prefs.analytics_cookies = 'analytics_cookies' in request.form
-            prefs.consent_updated_at = datetime.utcnow()
-            db.session.commit()
-            
+            privacy_collection.update_one(
+                {'firebase_uid': firebase_uid},
+                {'$set': {
+                    'functional_cookies': 'functional_cookies' in request.form,
+                    'analytics_cookies': 'analytics_cookies' in request.form,
+                    'consent_updated_at': datetime.utcnow(),
+                    'updated_at': datetime.utcnow(),
+                }}
+            )
             log_data_processing(
                 firebase_uid, 
                 'update_cookie_preferences', 
@@ -947,14 +963,17 @@ def privacy_settings():
                 'User updated cookie consent preferences'
             )
             success = "Cookie preferences updated successfully"
-            
         elif action == 'update_retention':
             prefs = get_user_privacy_preferences(firebase_uid)
-            prefs.auto_delete_polls = 'auto_delete_polls' in request.form
-            prefs.consent_updated_at = datetime.utcnow()
-            db.session.commit()
+            privacy_collection.update_one(
+                {'firebase_uid': firebase_uid},
+                {'$set': {
+                    'auto_delete_polls': 'auto_delete_polls' in request.form,
+                    'consent_updated_at': datetime.utcnow(),
+                    'updated_at': datetime.utcnow(),
+                }}
+            )
             success = "Data retention settings updated successfully"
-            
         elif action == 'download_data':
             # Create data export request
             export_request = DataExportRequest(
